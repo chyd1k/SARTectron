@@ -45,3 +45,8 @@ wheels/
 /datasets
 /projects/*/datasets
 /models
+/tools/deploy/bin_deploy
+
+
+
+*.exe

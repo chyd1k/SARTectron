@@ -18,7 +18,7 @@ cfg = get_cfg()
 cfg.merge_from_file(model_zoo.get_config_file(config_file))
 cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = 0.75 # Threshold
 cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url(config_file)
-cfg.MODEL.DEVICE = "cuda" # cpu or cuda
+cfg.MODEL.DEVICE = "cpu" # cpu or cuda
 
 # Create predictor
 predictor = DefaultPredictor(cfg)

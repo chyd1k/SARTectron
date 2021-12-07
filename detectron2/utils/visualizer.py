@@ -275,6 +275,10 @@ class VisImage:
                 the visualized image of shape (H, W, 3) (RGB) in uint8 type.
                 The shape is scaled w.r.t the input image using the given `scale` argument.
         """
+        # fix
+        if len(self.img.shape) == 2:
+            self.img = np.stack((self.img,) * 3, axis=-1)
+
         canvas = self.canvas
         s, (width, height) = canvas.print_to_buffer()
         if (self.width, self.height) != (width, height):
@@ -364,6 +368,7 @@ class Visualizer:
             output (VisImage): image object with visualizations.
         """
         boxes = predictions.pred_boxes if predictions.has("pred_boxes") else None
+        print(boxes)
         scores = predictions.scores if predictions.has("scores") else None
         classes = predictions.pred_classes if predictions.has("pred_classes") else None
         labels = _create_text_labels(classes, scores, self.metadata.get("thing_classes", None))

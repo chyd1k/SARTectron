@@ -11,6 +11,8 @@ import pycocotools.mask as mask_util
 import torch
 from fvcore.common.file_io import PathManager
 from PIL import Image
+from skimage import io
+import cv2
 
 from detectron2.structures import (
     BitMasks,
@@ -67,25 +69,27 @@ def convert_PIL_to_numpy(image, format):
     Returns:
         (np.ndarray): also see `read_image`
     """
-    if format is not None:
-        # PIL only supports RGB, so convert to RGB and flip channels over below
-        conversion_format = format
-        if format in ["BGR", "YUV-BT.601"]:
-            conversion_format = "RGB"
-        image = image.convert(conversion_format)
+    # fix
+    # if format is not None:
+    #     # PIL only supports RGB, so convert to RGB and flip channels over below
+    #     conversion_format = format
+    #     if format in ["BGR", "YUV-BT.601"]:
+    #         conversion_format = "RGB"
+    #     image = image.convert(conversion_format)
     image = np.asarray(image)
+
+    # fix
     # PIL squeezes out the channel dimension for "L", so make it HWC
-    if format == "L":
-        image = np.expand_dims(image, -1)
+    # if format == "L":
+    #     image = np.expand_dims(image, -1)
 
-    # handle formats not supported by PIL
-    elif format == "BGR":
-        # flip channels if needed
-        image = image[:, :, ::-1]
-    elif format == "YUV-BT.601":
-        image = image / 255.0
-        image = np.dot(image, np.array(_M_RGB2YUV).T)
-
+    # # handle formats not supported by PIL
+    # elif format == "BGR":
+    #     # flip channels if needed
+    #     image = image[:, :, ::-1]
+    # elif format == "YUV-BT.601":
+    #     image = image / 255.0
+    #     image = np.dot(image, np.array(_M_RGB2YUV).T)
     return image
 
 
@@ -175,12 +179,28 @@ def read_image(file_name, format=None):
         image (np.ndarray): an HWC image in the given format, which is 0-255, uint8 for
             supported image modes in PIL or "BGR"; float (0-1 for Y) for YUV-BT.601.
     """
-    with PathManager.open(file_name, "rb") as f:
-        image = Image.open(f)
-
-        # work around this bug: https://github.com/python-pillow/Pillow/issues/3973
-        image = _apply_exif_orientation(image)
-        return convert_PIL_to_numpy(image, format)
+    # fix
+    if file_name.lower().endswith(('.tiff', '.tif')):
+        image = io.imread(file_name)
+        # duplicate grayscale to 3 channels
+        # if len(image.shape) == 2:
+        #     image = np.stack((image,) * 3, axis=-1)
+        image = convert_PIL_to_numpy(image, format)
+        return image
+    else:
+        # image = io.imread(file_name)
+        # image = convert_PIL_to_numpy(image, format)
+        # print(image.shape)
+        # return image
+        with PathManager.open(file_name, "rb") as f:
+            image = Image.open(f)
+            # duplicate grayscale to 3 channels
+            # if (image.getbands()[0] == 'L') and (len(image.getbands()) == 1):
+            #     image = np.stack((image,) * 3, axis=-1)
+            # work around this bug: https://github.com/python-pillow/Pillow/issues/3973
+            image = _apply_exif_orientation(image)
+            image = convert_PIL_to_numpy(image, format)
+            return image
 
 
 def check_image_size(dataset_dict, image):

@@ -192,19 +192,28 @@ class DefaultAnchorGenerator(nn.Module):
         # quantization that results in slightly different sizes for different aspect ratios.
         # See also https://github.com/facebookresearch/Detectron/issues/227
 
+        # fix
+        # anchors = []
+        # for size in sizes:
+        #     area = size ** 2.0
+        #     for aspect_ratio in aspect_ratios:
+        #         # s * s = w * h
+        #         # a = h / w
+        #         # ... some algebra ...
+        #         # w = sqrt(s * s / a)
+        #         # h = a * w
+        #         w = math.sqrt(area / aspect_ratio)
+        #         h = aspect_ratio * w
+        #         x0, y0, x1, y1 = -w / 2.0, -h / 2.0, w / 2.0, h / 2.0
+        #         anchors.append([x0, y0, x1, y1])
         anchors = []
-        for size in sizes:
-            area = size ** 2.0
-            for aspect_ratio in aspect_ratios:
-                # s * s = w * h
-                # a = h / w
-                # ... some algebra ...
-                # w = sqrt(s * s / a)
-                # h = a * w
-                w = math.sqrt(area / aspect_ratio)
-                h = aspect_ratio * w
-                x0, y0, x1, y1 = -w / 2.0, -h / 2.0, w / 2.0, h / 2.0
-                anchors.append([x0, y0, x1, y1])
+        anchor_box_shapes = [[100., 150.], [108., 234.], [57., 130.], [53., 97.]]
+
+        for box_wh in anchor_box_shapes:
+            w = box_wh[0]
+            h = box_wh[1]
+            x0, y0, x1, y1 = -w / 2.0, -h / 2.0, w / 2.0, h / 2.0
+            anchors.append([x0, y0, x1, y1])
         return torch.tensor(anchors)
 
     def forward(self, features: List[torch.Tensor]):
