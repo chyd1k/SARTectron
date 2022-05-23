@@ -303,6 +303,7 @@ def detecting_from_dir(testing_dir, saving_dir, cfg):
                 H = int(search.group(1))
                 W = int(search.group(2))
 
+                temp = []
                 for ind, coordinates in enumerate(output["instances"].pred_boxes.to("cpu")):
                     print(coordinates)
                     class_index = output["instances"].pred_classes[ind]
@@ -312,7 +313,9 @@ def detecting_from_dir(testing_dir, saving_dir, cfg):
                                     round(coordinates[2].item()) + W, round(coordinates[3].item()) + H
                                 ]
                     prob = output["instances"].scores[ind].item()
-                    shape_json[img_path] = [abs_coord, class_name, prob]
+                    temp.append({"bbox" : abs_coord, "class_name" : class_name, "prob" : prob})
+                shape_json[img_path] = temp
+
         else:
             cv2.imwrite(saving_dir + "\\" + img_name, v.get_image()[:, :, ::-1])
 
