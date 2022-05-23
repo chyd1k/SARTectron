@@ -2,11 +2,12 @@ def script_method(fn, _rcb=None):
     return fn
 def script(obj, optimize=True, _frames_up=0, _rcb=None):
     return obj
+from turtle import shape
 import torch.jit
 torch.jit.script_method = script_method
 torch.jit.script = script
 
-import os, sys, torch, gc, time, cv2, copy
+import os, sys, torch, gc, time, cv2, copy, re, json
 # sys.path.append('D:/detectron2/detectron2')
 
 import numpy as np
@@ -130,8 +131,7 @@ class CustomPredictor:
             image = self.aug.get_transform(original_image).apply_image(original_image)
             # image = torch.as_tensor(image.transpose(2, 0, 1).astype("float32"))
             image = torch.as_tensor(image.astype("float32"))
-            
-            print(image.shape)
+
             inputs = {"image": image, "height": height, "width": width}
             predictions = self.model([inputs])[0]
             return predictions
@@ -279,8 +279,11 @@ def detecting_from_dir(testing_dir, saving_dir, cfg):
     thing_colors = [tuple(np.random.choice(range(256), size=3)) for _ in cfg.DATASETS.CLASSES_NAMES]
     metadata = Metadata()
     metadata.set(thing_classes = cfg.DATASETS.CLASSES_NAMES, thing_colors = thing_colors, evaluator_type = "coco")
+   
+    shape_json = {}
     for img_name in imgs:
-        image = utils.read_image(testing_dir + "\\" + img_name)
+        img_path = testing_dir + "/" + img_name
+        image = utils.read_image(img_path)
         output = predictor(image)
 
         if len(image.shape) == 2:
@@ -293,8 +296,26 @@ def detecting_from_dir(testing_dir, saving_dir, cfg):
             instance_mode=ColorMode.SEGMENTATION,
         )
         v = v.draw_instance_predictions(output["instances"].to("cpu"))
+        
+        if (img_name[:6] == "new_H_"):
+            if (len(output["instances"].pred_boxes) != 0):
+                search = re.search('new_H_(.*)_W_(.*).tif', img_name)
+                H = int(search.group(1))
+                W = int(search.group(2))
 
-        cv2.imwrite(saving_dir + "\\" + img_name, v.get_image()[:, :, ::-1])
+                for ind, coordinates in enumerate(output["instances"].pred_boxes.to("cpu")):
+                    print(coordinates)
+                    class_index = output["instances"].pred_classes[ind]
+                    class_name = metadata.thing_classes[class_index]
+                    abs_coord = [
+                                    round(coordinates[0].item()) + W, round(coordinates[1].item()) + H,
+                                    round(coordinates[2].item()) + W, round(coordinates[3].item()) + H
+                                ]
+                    prob = output["instances"].scores[ind].item()
+                    shape_json[img_path] = [abs_coord, class_name, prob]
+        else:
+            cv2.imwrite(saving_dir + "\\" + img_name, v.get_image()[:, :, ::-1])
+
         # if (len(output["instances"].pred_boxes) != 0):
         #     cv2.imwrite(saving_dir + "\\" + img_name, v.get_image()[:, :, ::-1])
         #     # cv2.imshow("images", v.get_image()[:, :, ::-1])
@@ -302,6 +323,12 @@ def detecting_from_dir(testing_dir, saving_dir, cfg):
         #     print(f"Image {i} / {len(imgs)} is done.")
 
         i += 1
+
+    if len(shape_json) != 0:
+        res_shape = saving_dir + "/" + "detection_results.shp"
+        with open(res_shape, "w") as f:
+            json.dump(shape_json, f, indent=4)
+
     print("\n--- Time spend for detection: %s seconds ---" % (time.time() - start_time))
     return
 
