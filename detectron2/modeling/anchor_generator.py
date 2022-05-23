@@ -89,7 +89,7 @@ class DefaultAnchorGenerator(nn.Module):
     """
 
     @configurable
-    def __init__(self, *, sizes, aspect_ratios, strides, offset=0.5):
+    def __init__(self, *, sizes, aspect_ratios, strides, offset=0.5, anchor_box_shapes):
         """
         This interface is experimental.
 
@@ -113,7 +113,8 @@ class DefaultAnchorGenerator(nn.Module):
         self.num_features = len(self.strides)
         sizes = _broadcast_params(sizes, self.num_features, "sizes")
         aspect_ratios = _broadcast_params(aspect_ratios, self.num_features, "aspect_ratios")
-        self.cell_anchors = self._calculate_anchors(sizes, aspect_ratios)
+        
+        self.cell_anchors = self._calculate_anchors(sizes, aspect_ratios, anchor_box_shapes)
 
         self.offset = offset
         assert 0.0 <= self.offset < 1.0, self.offset
@@ -125,11 +126,12 @@ class DefaultAnchorGenerator(nn.Module):
             "aspect_ratios": cfg.MODEL.ANCHOR_GENERATOR.ASPECT_RATIOS,
             "strides": [x.stride for x in input_shape],
             "offset": cfg.MODEL.ANCHOR_GENERATOR.OFFSET,
+            "anchor_box_shapes" : cfg.MODEL.ANCHOR_GENERATOR.EXPECTED_SHAPES,
         }
 
-    def _calculate_anchors(self, sizes, aspect_ratios):
+    def _calculate_anchors(self, sizes, aspect_ratios, anchor_box_shapes):
         cell_anchors = [
-            self.generate_cell_anchors(s, a).float() for s, a in zip(sizes, aspect_ratios)
+            self.generate_cell_anchors(s, a, anchor_box_shapes).float() for s, a in zip(sizes, aspect_ratios)
         ]
         return BufferList(cell_anchors)
 
@@ -170,7 +172,7 @@ class DefaultAnchorGenerator(nn.Module):
 
         return anchors
 
-    def generate_cell_anchors(self, sizes=(32, 64, 128, 256, 512), aspect_ratios=(0.5, 1, 2)):
+    def generate_cell_anchors(self, sizes=(32, 64, 128, 256, 512), aspect_ratios=(0.5, 1, 2), anchor_box_shapes=[]):
         """
         Generate a tensor storing canonical anchor boxes, which are all anchor
         boxes of different sizes and aspect_ratios centered at (0, 0).
@@ -193,27 +195,27 @@ class DefaultAnchorGenerator(nn.Module):
         # See also https://github.com/facebookresearch/Detectron/issues/227
 
         # fix
-        # anchors = []
-        # for size in sizes:
-        #     area = size ** 2.0
-        #     for aspect_ratio in aspect_ratios:
-        #         # s * s = w * h
-        #         # a = h / w
-        #         # ... some algebra ...
-        #         # w = sqrt(s * s / a)
-        #         # h = a * w
-        #         w = math.sqrt(area / aspect_ratio)
-        #         h = aspect_ratio * w
-        #         x0, y0, x1, y1 = -w / 2.0, -h / 2.0, w / 2.0, h / 2.0
-        #         anchors.append([x0, y0, x1, y1])
         anchors = []
-        anchor_box_shapes = [[100., 150.], [108., 234.], [57., 130.], [53., 97.]]
-
-        for box_wh in anchor_box_shapes:
-            w = box_wh[0]
-            h = box_wh[1]
-            x0, y0, x1, y1 = -w / 2.0, -h / 2.0, w / 2.0, h / 2.0
-            anchors.append([x0, y0, x1, y1])
+        if (len(anchor_box_shapes) == 0):
+            for size in sizes:
+                area = size ** 2.0
+                for aspect_ratio in aspect_ratios:
+                    # s * s = w * h
+                    # a = h / w
+                    # ... some algebra ...
+                    # w = sqrt(s * s / a)
+                    # h = a * w
+                    w = math.sqrt(area / aspect_ratio)
+                    h = aspect_ratio * w
+                    x0, y0, x1, y1 = -w / 2.0, -h / 2.0, w / 2.0, h / 2.0
+                    anchors.append([x0, y0, x1, y1])
+        else:
+            # anchor_box_shapes = [[100., 150.], [108., 234.], [57., 130.], [53., 97.]]
+            for box_wh in anchor_box_shapes:
+                w = box_wh[0]
+                h = box_wh[1]
+                x0, y0, x1, y1 = -w / 2.0, -h / 2.0, w / 2.0, h / 2.0
+                anchors.append([x0, y0, x1, y1])
         return torch.tensor(anchors)
 
     def forward(self, features: List[torch.Tensor]):

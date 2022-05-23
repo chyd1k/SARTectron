@@ -72,7 +72,7 @@ class HookBase:
         """
         Called before each iteration.
         """
-        print(f" Before iteration {self.trainer.iter}!")
+        # print(f" Before iteration {self.trainer.iter}!")
         pass
 
     def after_step(self):
@@ -137,6 +137,7 @@ class TrainerBase:
             try:
                 self.before_train()
                 for self.iter in range(start_iter, max_iter):
+                    logger.info("   Iteration {}".format(self.iter))
                     self.before_step()
                     self.run_step()
                     self.after_step()

@@ -1,0 +1,5 @@
+_BASE_: "../Base-RCNN-C4.yaml"
+MODEL:
+  MASK_ON: False
+  RESNETS:
+    DEPTH: 50

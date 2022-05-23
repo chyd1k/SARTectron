@@ -102,6 +102,8 @@ _C.DATASETS.TEST = ()
 _C.DATASETS.PROPOSAL_FILES_TEST = ()
 # Number of top scoring precomputed proposals to keep for test
 _C.DATASETS.PRECOMPUTED_PROPOSAL_TOPK_TEST = 1000
+# Classes names
+_C.DATASETS.CLASSES_NAMES = []
 
 # -----------------------------------------------------------------------------
 # DataLoader
@@ -188,6 +190,8 @@ _C.MODEL.ANCHOR_GENERATOR.ANGLES = [[-90, 0, 90]]
 # Value has to be in [0, 1). Recommend to use 0.5, which means half stride.
 # The value is not expected to affect model accuracy.
 _C.MODEL.ANCHOR_GENERATOR.OFFSET = 0.0
+# Expected shapes
+_C.MODEL.ANCHOR_GENERATOR.EXPECTED_SHAPES = [[100, 150], [108, 234], [57, 130], [53, 97]]
 
 # ---------------------------------------------------------------------------- #
 # RPN options
