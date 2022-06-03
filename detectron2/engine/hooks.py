@@ -5,6 +5,7 @@ import datetime
 import itertools
 import logging
 import os
+import sys
 import tempfile
 import time
 from collections import Counter
@@ -102,6 +103,9 @@ class IterationTimer(HookBase):
 
     def after_train(self):
         logger = logging.getLogger(__name__)
+        h = logging.StreamHandler(sys.stdout)
+        h.flush = sys.stdout.flush
+        logger.addHandler(h)
         total_time = time.perf_counter() - self._start_time
         total_time_minus_hooks = self._total_timer.seconds()
         hook_time = total_time - total_time_minus_hooks

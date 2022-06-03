@@ -493,6 +493,9 @@ Alternatively, you can call evaluation functions yourself (see Colab balloon tut
             dict: a dict of result metrics
         """
         logger = logging.getLogger(__name__)
+        h = logging.StreamHandler(sys.stdout)
+        h.flush = sys.stdout.flush
+        logger.addHandler(h)
         if isinstance(evaluators, DatasetEvaluator):
             evaluators = [evaluators]
         if evaluators is not None:

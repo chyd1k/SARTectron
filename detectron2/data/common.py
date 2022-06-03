@@ -4,6 +4,7 @@ import logging
 import numpy as np
 import pickle
 import random
+import sys
 import torch.utils.data as data
 
 from detectron2.utils.serialize import PicklableWrapper
@@ -50,6 +51,9 @@ class MapDataset(data.Dataset):
 
             if retry_count >= 3:
                 logger = logging.getLogger(__name__)
+                h = logging.StreamHandler(sys.stdout)
+                h.flush = sys.stdout.flush
+                logger.addHandler(h)
                 logger.warning(
                     "Failed to apply `_map_func` for idx: {}, retry count: {}".format(
                         idx, retry_count
@@ -83,6 +87,9 @@ class DatasetFromList(data.Dataset):
 
         if self._serialize:
             logger = logging.getLogger(__name__)
+            h = logging.StreamHandler(sys.stdout)
+            h.flush = sys.stdout.flush
+            logger.addHandler(h)
             logger.info(
                 "Serializing {} elements to byte tensors and concatenating them all ...".format(
                     len(self._lst)

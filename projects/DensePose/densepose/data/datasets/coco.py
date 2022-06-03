@@ -3,6 +3,7 @@ import contextlib
 import io
 import logging
 import os
+import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
@@ -270,6 +271,9 @@ def load_coco_json(annotations_json_file: str, image_root: str, dataset_name: st
     #  'id': 1268}
     imgs = coco_api.loadImgs(img_ids)
     logger = logging.getLogger(__name__)
+    h = logging.StreamHandler(sys.stdout)
+    h.flush = sys.stdout.flush
+    logger.addHandler(h)
     logger.info("Loaded {} images in COCO format from {}".format(len(imgs), annotations_json_file))
     # anns is a list[list[dict]], where each dict is an annotation
     # record for an object. The inner list enumerates the objects in an image
