@@ -209,11 +209,11 @@ def TrainBegin(options):
 
     # options.ANCHOR_GENERATOR_EXPECTED_SHAPES = "[[100, 150], [108, 234], [57, 130], [53, 97]]"
     if (len(options.ANCHOR_GENERATOR_EXPECTED_SHAPES) == 0):
-        print("Pass expected object shapes to program with --ANCHOR_GENERATOR_EXPECTED_SHAPES command.")
+        print("Pass expected object shapes to program with --ANCHOR_GENERATOR_EXPECTED_SHAPES command.", flush=True)
         return
     
     if (len(options.CLASSES_NAMES) == 0) or (len(options.CLASSES_NAMES) != int(options.MODEL_ROI_HEADS_NUM_CLASSES)):
-        print("Pass classes names and number of classes via --CLASSES_NAMES and --MODEL_ROI_HEADS_NUM_CLASSES commands.")
+        print("Pass classes names and number of classes via --CLASSES_NAMES and --MODEL_ROI_HEADS_NUM_CLASSES commands.", flush=True)
         return
 
     params = {
@@ -272,7 +272,7 @@ def detecting_from_dir(testing_dir, saving_dir, cfg):
     for i in os.listdir(testing_dir):
         if (i[-3:] == "bmp") or (i[-3:] == "tif"):
             imgs.append(i)
-    print(f"Test images number is {len(imgs)}")
+    print(f"Test images number is {len(imgs)}", flush=True)
 
     i = 1
     start_time = time.time()
@@ -296,16 +296,16 @@ def detecting_from_dir(testing_dir, saving_dir, cfg):
             instance_mode=ColorMode.SEGMENTATION,
         )
         v = v.draw_instance_predictions(output["instances"].to("cpu"))
-        
+        num_founded = len(output["instances"].pred_boxes)
+        print(f"Image #{i} : founded {num_founded} objects", flush = True)
         if (img_name[:6] == "new_H_"):
-            if (len(output["instances"].pred_boxes) != 0):
+            if (num_founded != 0):
                 search = re.search('new_H_(.*)_W_(.*).tif', img_name)
                 H = int(search.group(1))
                 W = int(search.group(2))
 
                 temp = []
                 for ind, coordinates in enumerate(output["instances"].pred_boxes.to("cpu")):
-                    print(coordinates)
                     class_index = output["instances"].pred_classes[ind]
                     class_name = metadata.thing_classes[class_index]
                     abs_coord = [
@@ -313,17 +313,27 @@ def detecting_from_dir(testing_dir, saving_dir, cfg):
                                     round(coordinates[2].item()) + W, round(coordinates[3].item()) + H
                                 ]
                     prob = output["instances"].scores[ind].item()
+                    print(f"    Object #{ind} : Class '{class_name}', prob = {prob}", flush = True)
                     temp.append({"bbox" : abs_coord, "class_name" : class_name, "prob" : prob})
                 shape_json[img_path] = temp
-
         else:
+            if (num_founded != 0):
+                for ind, coordinates in enumerate(output["instances"].pred_boxes.to("cpu")):
+                    class_index = output["instances"].pred_classes[ind]
+                    class_name = metadata.thing_classes[class_index]
+                    abs_coord = [
+                                    round(coordinates[0].item()), round(coordinates[1].item()),
+                                    round(coordinates[2].item()), round(coordinates[3].item())
+                                ]
+                    prob = output["instances"].scores[ind].item()
+                    print(f"    Object #{ind} : Class '{class_name}', prob = {prob}", flush = True)
             cv2.imwrite(saving_dir + "\\" + img_name, v.get_image()[:, :, ::-1])
 
         # if (len(output["instances"].pred_boxes) != 0):
         #     cv2.imwrite(saving_dir + "\\" + img_name, v.get_image()[:, :, ::-1])
         #     # cv2.imshow("images", v.get_image()[:, :, ::-1])
         #     # cv2.waitKey(0)
-        #     print(f"Image {i} / {len(imgs)} is done.")
+        #     print(f"Image {i} / {len(imgs)} is done.", flush=True)
 
         i += 1
 
@@ -332,18 +342,20 @@ def detecting_from_dir(testing_dir, saving_dir, cfg):
         with open(res_shape, "w") as f:
             json.dump(shape_json, f, indent=4)
 
-    print("\n--- Time spend for detection: %s seconds ---" % (time.time() - start_time))
+    print("\n--- Time spend for detection: %s seconds ---" % (time.time() - start_time), flush=True)
     return
 
 
 def TestBegin(options):
     if (options.yaml_file[-5:] != ".yaml") or (options.testing_folder == "") or (options.saving_folder == ""):
-        return  
+        print("YAML file invalid or testing or saving folders are empty.", flush = True)
+        return
 
     cfg = get_cfg()
     cfg.merge_from_file(options.yaml_file)
 
-    if cfg.OUTPUT_DIR == "" or cfg.MODEL.WEIGHTS == "" or len(cfg.MODEL.ANCHOR_GENERATOR.EXPECTED_SHAPES) != len(cfg.DATASETS.CLASSES_NAMES):
+    if (cfg.OUTPUT_DIR == "") or (cfg.MODEL.WEIGHTS == "") or (len(cfg.MODEL.ANCHOR_GENERATOR.EXPECTED_SHAPES) != len(cfg.DATASETS.CLASSES_NAMES)):
+        print("Output dir is empty or no model weights file or shapes is broken.", flush = True)
         return
 
     detecting_from_dir(options.testing_folder, options.saving_folder, cfg)
@@ -358,7 +370,7 @@ def foo_callback_dgt(option, opt, value, parser):
 
 def foo_callback_lst(option, opt, value, parser):
     res = value.split(",")
-    print(res)
+    # print(res)
     setattr(parser.values, option.dest, res)
 
 

@@ -416,6 +416,9 @@ class DefaultTrainer(SimpleTrainer):
         """
         model = build_model(cfg)
         logger = logging.getLogger(__name__)
+        h = logging.StreamHandler(sys.stdout)
+        h.flush = sys.stdout.flush
+        logger.addHandler(h)
         logger.info("Model:\n{}".format(model))
         return model
 
