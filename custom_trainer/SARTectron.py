@@ -61,7 +61,7 @@ def custom_mapper(dataset_list):
     return dataset_list
 
 
-class CustomTrainer(DefaultTrainer):
+class CustomTrainerAndVal(DefaultTrainer):
     @classmethod
     def build_train_loader(cls, cfg):
         return build_detection_train_loader(cfg, mapper=custom_mapper)
@@ -84,6 +84,18 @@ class CustomTrainer(DefaultTrainer):
             )
         ))
         return hooks
+
+
+class CustomTrainerNoVal(DefaultTrainer):
+    @classmethod
+    def build_train_loader(cls, cfg):
+        return build_detection_train_loader(cfg, mapper=custom_mapper)
+
+    @classmethod
+    def build_evaluator(cls, cfg, dataset_name, output_folder=None):
+        if output_folder is None:
+            output_folder = os.path.join(cfg.OUTPUT_DIR, "inference")
+        return COCOEvaluator(dataset_name, cfg, True, output_folder)
 
 
 class CustomPredictor:
@@ -251,7 +263,8 @@ def TrainBegin(options):
     }
 
     train_dcs = reg_dataset(name_train_dataset, train_imgs_folder, train_annotation_path)
-    test_dcs = reg_dataset(name_test_dataset, test_imgs_folder, test_annotation_path)
+    if (name_test_dataset  != "") and (test_imgs_folder != "") and (test_annotation_path):
+        test_dcs = reg_dataset(name_test_dataset, test_imgs_folder, test_annotation_path)
 
     # base_cfg_path = "configs/Base-RCNN-FPN.yaml"
     cfg = set_cfg_params(params, base_cfg_path)
@@ -260,9 +273,23 @@ def TrainBegin(options):
     cfg_name = "sartectron_config.yaml"
     cfg_name = write_cfg(cfg, outp_weights_path + "/" + cfg_name)
 
-    trainer = CustomTrainer(cfg)
-    trainer.resume_or_load(resume=False)
-    trainer.train()
+    # Validation set is exist
+    if (name_test_dataset  != "") and (test_imgs_folder != "") and (test_annotation_path):
+        trainer = CustomTrainerAndVal(cfg)
+        if (options.MODEL_WEIGHTS[-4:] == ".pth"):
+            cfg.MODEL_WEIGHTS = options.MODEL_WEIGHTS
+            trainer.resume_or_load(resume = True)
+        else:
+            trainer.resume_or_load(resume = False)
+        trainer.train()
+    else:
+        trainer = CustomTrainerNoVal(cfg)
+        if (options.MODEL_WEIGHTS[-4:] == ".pth"):
+            cfg.MODEL_WEIGHTS = options.MODEL_WEIGHTS
+            trainer.resume_or_load(resume = True)
+        else:
+            trainer.resume_or_load(resume = False)
+        trainer.train()
     return
 
 

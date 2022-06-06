@@ -133,8 +133,7 @@ class TrainerBase:
         h.flush = sys.stdout.flush
         logger.addHandler(h)
         logger.info("Starting training from iteration {}".format(start_iter))
-
-        self.iter = self.start_iter = start_iter
+        print("Starting training from iteration {}".format(start_iter), flush = True)
         self.max_iter = max_iter
 
         with EventStorage(start_iter) as self.storage:
