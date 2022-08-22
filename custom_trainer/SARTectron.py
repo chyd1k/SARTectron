@@ -149,6 +149,52 @@ class CustomPredictor:
             return predictions
 
 
+def compute_iou(box, box2, min_w, min_h):
+    xA = max(box[0], box2[0])
+    yA = max(box[1], box2[1])
+    xB = min(box[2], box2[2])
+    yB = min(box[3], box2[3])
+    interArea = max(0, xB - xA + 1) * max(0, yB - yA + 1)        
+    box1Area = (box[2] - box[0] + 1) * (box[3] - box[1] + 1)
+    box2Area = (box2[2] - box2[0] + 1) * (box2[3] - box2[1] + 1)
+    iou = 1 if (box1Area < 10 or box2Area < 10 or
+        box[2] - box[0] < min_w or box[3] - box[1] < min_h or
+        box2[2] - box2[0] < min_w or box2[3] - box2[1] < min_h) else interArea / float(box1Area + box2Area - interArea)
+    return iou
+
+
+# { "class" : [ {"bbox", "prob", "path"}, ... ],
+#   "class2" :  [ {"bbox", "prob", "path"}    ] }
+def non_maximum_suppression(js, threshhold, min_w, min_h):
+    temp_dict = {}
+    for i in js:
+        for j in js[i]:
+            if j["class_name"] not in temp_dict.keys():
+                temp_dict[j["class_name"]] = []
+            j["path"] = i
+            class_name = j["class_name"]
+            del j["class_name"]
+            temp_dict[class_name].append(j)
+
+    final_dict = {}
+    for i in temp_dict:
+        final_boxes = []
+        lst_json_sorted = sorted(temp_dict[i], key=lambda d: d["prob"], reverse=True)
+        while len(lst_json_sorted) > 0:
+            # removing the best probability bounding box
+            box = lst_json_sorted.pop(0)
+            for b in lst_json_sorted:
+                iou = compute_iou(box["bbox"], b["bbox"], min_w, min_h)
+                if iou >= threshhold:
+                    lst_json_sorted.remove(b)
+            final_boxes.append(box)
+        for j in final_boxes:
+            if j["path"] not in final_dict:
+                final_dict[j["path"]] = []
+            final_dict[j["path"]].append({"bbox" : j["bbox"], "class_name" : i, "prob" : j["prob"]})
+    return final_dict
+
+
 def write_cfg(cfg, full_cfg_path):
     with open(full_cfg_path, "w") as f:
         f.write(cfg.dump())
@@ -204,6 +250,7 @@ def set_cfg_params(params, base_cfg_path = ""):
     cfg.TEST.DETECTIONS_PER_IMAGE = params["TEST_DETECTIONS_PER_IMAGE"]
     cfg.MODEL.ANCHOR_GENERATOR.EXPECTED_SHAPES = params["ANCHOR_GENERATOR_EXPECTED_SHAPES"]
     cfg.DATASETS.CLASSES_NAMES = params["CLASSES_NAMES"]
+    cfg.MODEL.RADAR_NMS = params["RADAR_NMS"]
     # MetadataCatalog.get(params["NAME_OF_TRAIN_DATASET"]).thing_classes
     return cfg
 
@@ -259,7 +306,8 @@ def TrainBegin(options):
         "MODEL_RPN_POST_NMS_TOPK_TEST" : options.MODEL_RPN_POST_NMS_TOPK_TEST,
         "TEST_DETECTIONS_PER_IMAGE" : options.TEST_DETECTIONS_PER_IMAGE,
         "ANCHOR_GENERATOR_EXPECTED_SHAPES" : options.ANCHOR_GENERATOR_EXPECTED_SHAPES,
-        "CLASSES_NAMES" : options.CLASSES_NAMES
+        "CLASSES_NAMES" : options.CLASSES_NAMES,
+        "RADAR_NMS" : options.RADAR_NMS
     }
 
     train_dcs = reg_dataset(name_train_dataset, train_imgs_folder, train_annotation_path)
@@ -365,6 +413,7 @@ def detecting_from_dir(testing_dir, saving_dir, cfg):
         i += 1
 
     if len(shape_json) != 0:
+        shape_json = non_maximum_suppression(shape_json, cfg.MODEL.RADAR_NMS, 5, 5)
         res_shape = saving_dir + "/" + "detection_results.shp"
         with open(res_shape, "w") as f:
             json.dump(shape_json, f, indent=4)
@@ -444,6 +493,7 @@ def parse_params():
     parser.add_option("--M_RPN_POST_NMS_TOPK_TR", "--MODEL_RPN_POST_NMS_TOPK_TRAIN", type = "int", dest="MODEL_RPN_POST_NMS_TOPK_TRAIN", help="MODEL_RPN_POST_NMS_TOPK_TRAIN", default = 3000)
     parser.add_option("--M_RPN_POST_NMS_TOPK_TEST", "--MODEL_RPN_POST_NMS_TOPK_TEST", type = "int", dest="MODEL_RPN_POST_NMS_TOPK_TEST", help="MODEL_RPN_POST_NMS_TOPK_TEST", default = 2000)
     parser.add_option("--TEST_DETECTIONS_PER_IMAGE", "--TEST_DETECTIONS_PER_IMAGE", type = "int", dest="TEST_DETECTIONS_PER_IMAGE", help="TEST_DETECTIONS_PER_IMAGE", default = 200)
+    parser.add_option("--RDR_NMS", "--RADAR_NMS", type = "float", dest="RADAR_NMS", help="RADAR_NMS", default = 0.5)
 
     # Test mode
     parser.add_option("--test", "--test_from_dir", dest="test_from_dir", help="Set SARTectron in interference mode.", action="store_true", default=False)
