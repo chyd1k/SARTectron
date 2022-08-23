@@ -163,23 +163,13 @@ def compute_iou(box, box2, min_w, min_h):
     return iou
 
 
-# { "class" : [ {"bbox", "prob", "path"}, ... ],
+# { "class" : [ {"bbox" : [], "prob" : 0.5, "path" = "p"}, ... ],
 #   "class2" :  [ {"bbox", "prob", "path"}    ] }
 def non_maximum_suppression(js, threshhold, min_w, min_h):
-    temp_dict = {}
-    for i in js:
-        for j in js[i]:
-            if j["class_name"] not in temp_dict.keys():
-                temp_dict[j["class_name"]] = []
-            j["path"] = i
-            class_name = j["class_name"]
-            del j["class_name"]
-            temp_dict[class_name].append(j)
-
     final_dict = {}
-    for i in temp_dict:
+    for i in js:
         final_boxes = []
-        lst_json_sorted = sorted(temp_dict[i], key=lambda d: d["prob"], reverse=True)
+        lst_json_sorted = sorted(js[i], key=lambda d: d["prob"], reverse=True)
         while len(lst_json_sorted) > 0:
             # removing the best probability bounding box
             box = lst_json_sorted.pop(0)
@@ -388,9 +378,10 @@ def detecting_from_dir(testing_dir, saving_dir, cfg):
                                     round(coordinates[2].item()) + W, round(coordinates[3].item()) + H
                                 ]
                     prob = output["instances"].scores[ind].item()
+                    if (class_name not in shape_json.keys()):
+                        shape_json[class_name] = []
+                    shape_json[class_name].append({"bbox" : abs_coord, "prob" : prob, "path" : img_path})
                     print(f"    Object #{ind} : Class '{class_name}', prob = {prob}", flush = True)
-                    temp.append({"bbox" : abs_coord, "class_name" : class_name, "prob" : prob})
-                shape_json[img_path] = temp
         else:
             if (num_founded != 0):
                 for ind, coordinates in enumerate(output["instances"].pred_boxes.to("cpu")):
@@ -414,7 +405,7 @@ def detecting_from_dir(testing_dir, saving_dir, cfg):
 
     if len(shape_json) != 0:
         shape_json = non_maximum_suppression(shape_json, cfg.MODEL.RADAR_NMS, 5, 5)
-        res_shape = saving_dir + "/" + "detection_results.shp"
+        res_shape = saving_dir + "/" + "detection_results.json"
         with open(res_shape, "w") as f:
             json.dump(shape_json, f, indent=4)
 
