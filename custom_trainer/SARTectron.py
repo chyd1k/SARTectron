@@ -154,9 +154,9 @@ def compute_iou(box, box2, min_w, min_h):
     yA = max(box[1], box2[1])
     xB = min(box[2], box2[2])
     yB = min(box[3], box2[3])
-    interArea = max(0, xB - xA + 1) * max(0, yB - yA + 1)        
-    box1Area = (box[2] - box[0] + 1) * (box[3] - box[1] + 1)
-    box2Area = (box2[2] - box2[0] + 1) * (box2[3] - box2[1] + 1)
+    interArea = max(0, xB - xA) * max(0, yB - yA)        
+    box1Area = (box[2] - box[0]) * (box[3] - box[1])
+    box2Area = (box2[2] - box2[0]) * (box2[3] - box2[1])
     iou = 1 if (box1Area < 10 or box2Area < 10 or
         box[2] - box[0] < min_w or box[3] - box[1] < min_h or
         box2[2] - box2[0] < min_w or box2[3] - box2[1] < min_h) else interArea / float(box1Area + box2Area - interArea)
@@ -168,17 +168,16 @@ def compute_iou(box, box2, min_w, min_h):
 def non_maximum_suppression(js, threshhold, min_w, min_h):
     final_dict = {}
     for i in js:
-        final_boxes = []
         lst_json_sorted = sorted(js[i], key=lambda d: d["prob"], reverse=True)
-        while len(lst_json_sorted) > 0:
-            # removing the best probability bounding box
-            box = lst_json_sorted.pop(0)
-            for b in lst_json_sorted:
-                iou = compute_iou(box["bbox"], b["bbox"], min_w, min_h)
-                if iou >= threshhold:
-                    lst_json_sorted.remove(b)
-            final_boxes.append(box)
-        for j in final_boxes:
+        keep = []
+        while (len(lst_json_sorted) != 0):
+            highest_confidence_bbox = lst_json_sorted.pop(0)
+            keep.append(highest_confidence_bbox)
+            if (len(lst_json_sorted) == 0):
+                break
+            IoU = [compute_iou(highest_confidence_bbox["bbox"], j["bbox"], min_w, min_h) for j in lst_json_sorted]
+            [lst_json_sorted.pop(j) for j in range(len(IoU) - 1, -1, -1) if IoU[j] > threshhold]
+        for j in keep:
             if j["path"] not in final_dict:
                 final_dict[j["path"]] = []
             final_dict[j["path"]].append({"bbox" : j["bbox"], "class_name" : i, "prob" : j["prob"]})
