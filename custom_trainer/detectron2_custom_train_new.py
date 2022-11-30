@@ -82,7 +82,7 @@ def create_cfg(weights_root, name_of_dataset_train, name_of_dataset_test):
         cfg.DATASETS.TEST = (name_of_dataset_test,)
         cfg.TEST.EVAL_PERIOD = 25 # 50
 
-    cfg.MODEL.DEVICE = "cpu"  # cpu or cuda
+    cfg.MODEL.DEVICE = "cuda"  # cpu or cuda
 
     # cfg.INPUT.RANDOM_FLIP = "horizontal"
     # cfg.DATALOADER.NUM_WORKERS = 8
@@ -318,11 +318,11 @@ def main():
     # )
     train_begin("coco_Planes_detection_Train",
         "coco_Planes_detection_Test",
-        "C:/Users/savchenko.bs/Desktop/AnnotationToolTest",
-        "C:/Users/savchenko.bs/Desktop/new_placement/detectron2/weights/RDP_1000_1000/TIFF",
-        "C:/Users/savchenko.bs/Desktop/AnnotationToolTest/Train_Data.json",
-        "C:/Users/savchenko.bs/Desktop/new_placement/detectron2/weights/RDP_1000_1000/TIFF/Test_Data_REAL.json",
-        "C:/Users/savchenko.bs/Desktop/AnnotationToolTest/weights"
+        "D:/Train_Test_Detectron2/OilPumps_Project",
+        "D:/Train_Test_Detectron2/OilPumps_Project",
+        "D:/Train_Test_Detectron2/OilPumps_Project/Train_Data_MAIN.json",
+        "D:/Train_Test_Detectron2/OilPumps_Project/Test_Data.json",
+        "D:/Train_Test_Detectron2/del"
     )
 
 
