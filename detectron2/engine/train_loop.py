@@ -7,7 +7,6 @@ import numpy as np
 import time
 import weakref
 import torch
-import sys
 
 import detectron2.utils.comm as comm
 from detectron2.utils.events import EventStorage
@@ -129,11 +128,9 @@ class TrainerBase:
             start_iter, max_iter (int): See docs above
         """
         logger = logging.getLogger(__name__)
-        h = logging.StreamHandler(sys.stdout)
-        h.flush = sys.stdout.flush
-        logger.addHandler(h)
         logger.info("Starting training from iteration {}".format(start_iter))
-        print("Starting training from iteration {}".format(start_iter), flush = True)
+
+        self.iter = self.start_iter = start_iter
         self.max_iter = max_iter
 
         with EventStorage(start_iter) as self.storage:

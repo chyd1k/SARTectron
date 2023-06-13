@@ -2,12 +2,13 @@ def script_method(fn, _rcb=None):
     return fn
 def script(obj, optimize=True, _frames_up=0, _rcb=None):
     return obj
-from turtle import shape
+
 import torch.jit
 torch.jit.script_method = script_method
 torch.jit.script = script
 
 import os, sys, torch, gc, time, cv2, copy, re, json
+from multiprocessing import Process, freeze_support
 # sys.path.append('D:/detectron2/detectron2')
 
 import numpy as np
@@ -32,27 +33,28 @@ import detectron2.data.transforms as T
 gc.collect()
 torch.cuda.empty_cache()
 
+colors = { "default" : "\x1b[0m", "red" : "\x1b[31m", "green" : "\x1b[32m", "cyan" : "\x1b[36m" }
+
 
 def custom_mapper(dataset_list):
     dataset_list = copy.deepcopy(dataset_list)  # it will be modified by code below
 
     image = utils.read_image(dataset_list["file_name"], format=None)
-    # transform_list = [
-    #     T.Resize((800,800))
-    #     # T.Resize((800,800)),
-    #     # T.RandomBrightness(0.8, 1.8),
-    #     # T.RandomContrast(0.6, 1.3),
-    #     # T.RandomSaturation(0.8, 1.4),
-    #     # T.RandomRotation(angle=[90, 90]),
-    #     # T.RandomLighting(0.7),
-    #     # T.RandomFlip(prob=0.4, horizontal=False, vertical=True),
-    #     ]
-    # image, transforms = T.apply_transform_gens(transform_list, image)
+    transform_list = [
+        # T.Resize((800,800)),
+        T.RandomBrightness(0.8, 1.8),
+        T.RandomContrast(0.6, 1.3),
+        # T.RandomSaturation(0.8, 1.4),
+        # T.RandomRotation(angle=[90, 90]),
+        # T.RandomLighting(0.7),
+        # T.RandomFlip(prob=0.4, horizontal=False, vertical=True),
+        ]
+    image, transforms = T.apply_transform_gens(transform_list, image)
     # dataset_list["image"] = torch.as_tensor(image.transpose(2, 0, 1).astype("float32"))
     dataset_list["image"] = torch.as_tensor(image.astype("float32"))
 
     annos = [
-        utils.transform_instance_annotations(obj, [], image.shape[:2])
+        utils.transform_instance_annotations(obj, transforms, image.shape[:2])
         for obj in dataset_list.pop("annotations")
         if obj.get("iscrowd", 0) == 0
         ]
@@ -239,6 +241,10 @@ def set_cfg_params(params, base_cfg_path = ""):
     cfg.TEST.DETECTIONS_PER_IMAGE = params["TEST_DETECTIONS_PER_IMAGE"]
     cfg.MODEL.ANCHOR_GENERATOR.EXPECTED_SHAPES = params["ANCHOR_GENERATOR_EXPECTED_SHAPES"]
     cfg.DATASETS.CLASSES_NAMES = params["CLASSES_NAMES"]
+    # turn on GroupNorm
+    cfg.MODEL.FPN.NORM = "GN"
+    cfg.MODEL.ROI_BOX_HEAD.NORM = "GN"
+    cfg.MODEL.RESNETS.NORM = "GN"
     # cfg.MODEL.RADAR_NMS = params["RADAR_NMS"]
     # MetadataCatalog.get(params["NAME_OF_TRAIN_DATASET"]).thing_classes
     return cfg
@@ -257,11 +263,11 @@ def TrainBegin(options):
 
     # options.ANCHOR_GENERATOR_EXPECTED_SHAPES = "[[100, 150], [108, 234], [57, 130], [53, 97]]"
     if (len(options.ANCHOR_GENERATOR_EXPECTED_SHAPES) == 0):
-        print("Pass expected object shapes to program with --ANCHOR_GENERATOR_EXPECTED_SHAPES command.", flush=True)
+        print(colors["red"] + "Pass expected object shapes to program with --ANCHOR_GENERATOR_EXPECTED_SHAPES command.", flush=True)
         return
     
     if (len(options.CLASSES_NAMES) == 0) or (len(options.CLASSES_NAMES) != int(options.MODEL_ROI_HEADS_NUM_CLASSES)):
-        print("Pass classes names and number of classes via --CLASSES_NAMES and --MODEL_ROI_HEADS_NUM_CLASSES commands.", flush=True)
+        print(colors["red"] + "Pass classes names and number of classes via --CLASSES_NAMES and --MODEL_ROI_HEADS_NUM_CLASSES commands.", flush=True)
         return
 
     params = {
@@ -336,7 +342,7 @@ def detecting_from_dir(testing_dir, saving_dir, cfg):
     for i in os.listdir(testing_dir):
         if (i[-3:] == "bmp") or (i[-3:] == "tif"):
             imgs.append(i)
-    print(f"Test images number is {len(imgs)}", flush=True)
+    print(f"{colors['green']}Test images number is {len(imgs)}", flush=True)
 
     i = 1
     start_time = time.time()
@@ -350,18 +356,8 @@ def detecting_from_dir(testing_dir, saving_dir, cfg):
         image = utils.read_image(img_path)
         output = predictor(image)
 
-        if len(image.shape) == 2:
-            image = np.stack((image,) * 3, axis=-1)
-
-        v = Visualizer(
-            image[:, :, ::-1],
-            metadata = metadata,
-            # scale=0.8,
-            instance_mode=ColorMode.SEGMENTATION,
-        )
-        v = v.draw_instance_predictions(output["instances"].to("cpu"))
         num_founded = len(output["instances"].pred_boxes)
-        print(f"Image #{i} : founded {num_founded} objects", flush = True)
+        print(f"{colors['green']}Image #{i} : founded {num_founded} objects", flush = True)
         if (img_name[:6] == "new_H_"):
             if (num_founded != 0):
                 search = re.search('new_H_(.*)_W_(.*).tif', img_name)
@@ -380,8 +376,19 @@ def detecting_from_dir(testing_dir, saving_dir, cfg):
                     if (class_name not in shape_json.keys()):
                         shape_json[class_name] = []
                     shape_json[class_name].append({"bbox" : abs_coord, "prob" : prob, "path" : img_path})
-                    print(f"    Object #{ind} : Class '{class_name}', prob = {prob}", flush = True)
+                    print(f"{colors['default']}    Object #{ind} : Class '{class_name}', prob = {prob}", flush = True)
         else:
+            if len(image.shape) == 2:
+                image = np.stack((image,) * 3, axis=-1)
+
+            v = Visualizer(
+                image[:, :, ::-1],
+                metadata = metadata,
+                # scale=0.8,
+                instance_mode=ColorMode.SEGMENTATION,
+            )
+            v = v.draw_instance_predictions(output["instances"].to("cpu"))
+            
             if (num_founded != 0):
                 for ind, coordinates in enumerate(output["instances"].pred_boxes.to("cpu")):
                     class_index = output["instances"].pred_classes[ind]
@@ -391,7 +398,7 @@ def detecting_from_dir(testing_dir, saving_dir, cfg):
                                     round(coordinates[2].item()), round(coordinates[3].item())
                                 ]
                     prob = output["instances"].scores[ind].item()
-                    print(f"    Object #{ind} : Class '{class_name}', prob = {prob}", flush = True)
+                    print(f"{colors['default']}    Object #{ind} : Class '{class_name}', prob = {prob}", flush = True)
             cv2.imwrite(saving_dir + "\\" + img_name, v.get_image()[:, :, ::-1])
 
         # if (len(output["instances"].pred_boxes) != 0):
@@ -414,14 +421,14 @@ def detecting_from_dir(testing_dir, saving_dir, cfg):
 
 def TestBegin(options):
     if (options.yaml_file[-5:] != ".yaml") or (options.testing_folder == "") or (options.saving_folder == ""):
-        print("YAML file invalid or testing or saving folders are empty.", flush = True)
+        print(colors['red'] + "YAML file invalid or testing or saving folders are empty.", flush = True)
         return
 
     cfg = get_cfg()
     cfg.merge_from_file(options.yaml_file)
 
     if (cfg.OUTPUT_DIR == "") or (cfg.MODEL.WEIGHTS == "") or (len(cfg.MODEL.ANCHOR_GENERATOR.EXPECTED_SHAPES) != len(cfg.DATASETS.CLASSES_NAMES)):
-        print("Output dir is empty or no model weights file or shapes is broken.", flush = True)
+        print(colors['red'] + "Output dir is empty or no model weights file or shapes is broken.", flush = True)
         return
 
     detecting_from_dir(options.testing_folder, options.saving_folder, cfg)
@@ -494,9 +501,11 @@ def parse_params():
     (options, args) = parser.parse_args()
 
     if not options.test_from_dir and not options.train_network:
-        parser.error("Set SARTectron on Training or Testing mode with flags '--train_network' or '--test_from_dir' first.")
+        print(colors['red'] + "Set SARTectron on Training or Testing mode with flags '--train_network' or '--test_from_dir' first.", flush = True)
+        return
     elif options.test_from_dir and options.train_network:
-        parser.error("Choose one mode for neural network: '--train_network' OR '--test_from_dir'.")
+        print(colors['red'] + "Choose one mode for neural network: '--train_network' OR '--test_from_dir'.", flush = True)
+        return
 
     # Test
     if options.test_from_dir and not options.train_network:
@@ -529,6 +538,18 @@ def parse_params():
 
 def main():
     parse_params()
+
+    # cfg_name = "sartectron_config.yaml"
+    # cfg_path = "C:/Radar/Datasets/Tucson_Project/Weights_CondorScaled_TerrasarDescending/" + cfg_name
+    # cfg = get_cfg()
+    # cfg.merge_from_file(cfg_path)
+
+    # cfg.DATASETS.TRAIN = ("coco_2014_train", )
+    # cfg.DATASETS.TEST = ("",)
+
+    # trainer = CustomTrainerNoVal(cfg)
+    # trainer.resume_or_load(resume = False)
+    # trainer.train()
     
     # config_file = "D:/Train_Test_Detectron2/del_OUTPUT/sartectron_config.yaml"
     # model_name = "model_0000099.pth"
@@ -554,4 +575,5 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    freeze_support()
+    Process(target=main).start()

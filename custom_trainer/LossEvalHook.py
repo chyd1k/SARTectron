@@ -8,12 +8,48 @@ import torch
 import time
 import datetime
 import logging
+import sys
+from termcolor import colored
+
+class _ColorfulFormatter(logging.Formatter):
+    def __init__(self, *args, **kwargs):
+        self._root_name = kwargs.pop("root_name") + "."
+        self._abbrev_name = kwargs.pop("abbrev_name", "")
+        if len(self._abbrev_name):
+            self._abbrev_name = self._abbrev_name + "."
+        super(_ColorfulFormatter, self).__init__(*args, **kwargs)
+
+    def formatMessage(self, record):
+        record.name = record.name.replace(self._root_name, self._abbrev_name)
+        log = super(_ColorfulFormatter, self).formatMessage(record)
+        if record.levelno == logging.WARNING:
+            prefix = colored("WARNING", "red", attrs=["blink"])
+        elif record.levelno == logging.ERROR or record.levelno == logging.CRITICAL:
+            prefix = colored("ERROR", "red", attrs=["blink", "underline"])
+        else:
+            return log
+        return prefix + " " + log
+
+def set_StreamHandler():
+    logger = logging.getLogger(__name__)
+    h = logging.StreamHandler(sys.stdout)
+    abbrev_name = "d2" if __name__ == "detectron2" else __name__
+    h.flush = sys.stdout.flush
+    h.setFormatter(_ColorfulFormatter(
+                    colored("[%(asctime)s %(name)s]: ", "green") + "%(message)s",
+                    datefmt="%m/%d %H:%M:%S",
+                    root_name=__name__,
+                    abbrev_name=str(abbrev_name),
+                ))
+    logger.addHandler(h)
+    return
 
 class LossEvalHook(HookBase):
     def __init__(self, eval_period, model, data_loader):
         self._model = model
         self._period = eval_period
         self._data_loader = data_loader
+        set_StreamHandler()
 
     def _do_loss_eval(self):
         # Copying inference_on_dataset from evaluator.py

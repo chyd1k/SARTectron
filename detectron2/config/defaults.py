@@ -193,7 +193,7 @@ _C.MODEL.ANCHOR_GENERATOR.OFFSET = 0.0
 # Expected shapes
 _C.MODEL.ANCHOR_GENERATOR.EXPECTED_SHAPES = [[100, 150], [108, 234], [57, 130], [53, 97]]
 # IoU Radar for NMS
-# _C.MODEL.RADAR_NMS = 0.5
+_C.MODEL.RADAR_NMS = 0.5
 
 # ---------------------------------------------------------------------------- #
 # RPN options

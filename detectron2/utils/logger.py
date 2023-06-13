@@ -57,24 +57,18 @@ def setup_logger(
     if abbrev_name is None:
         abbrev_name = "d2" if name == "detectron2" else name
 
-    plain_formatter = logging.Formatter(
-        "[%(asctime)s] %(name)s %(levelname)s: %(message)s", datefmt="%m/%d %H:%M:%S"
-    )
-    # stdout logging: master only
-    if distributed_rank == 0:
-        ch = logging.StreamHandler(stream=sys.stdout)
-        ch.setLevel(logging.DEBUG)
-        if color:
-            formatter = _ColorfulFormatter(
+    formatter = _ColorfulFormatter(
                 colored("[%(asctime)s %(name)s]: ", "green") + "%(message)s",
                 datefmt="%m/%d %H:%M:%S",
                 root_name=name,
                 abbrev_name=str(abbrev_name),
             )
-        else:
-            formatter = plain_formatter
-        ch.setFormatter(formatter)
-        logger.addHandler(ch)
+    
+    # stdout logging: master only
+    ch = logging.StreamHandler(stream=sys.stdout)
+    ch.setLevel(logging.DEBUG)
+    ch.setFormatter(formatter)
+    logger.addHandler(ch)
 
     # file logging: all workers
     if output is not None:
@@ -88,6 +82,9 @@ def setup_logger(
 
         fh = logging.StreamHandler(_cached_log_stream(filename))
         fh.setLevel(logging.DEBUG)
+        plain_formatter = logging.Formatter(
+            "[%(asctime)s] %(name)s %(levelname)s: %(message)s", datefmt="%m/%d %H:%M:%S"
+        )
         fh.setFormatter(plain_formatter)
         logger.addHandler(fh)
 

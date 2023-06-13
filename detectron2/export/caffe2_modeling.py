@@ -118,6 +118,7 @@ def convert_batched_inputs_to_c2_format(batched_inputs, size_divisibility, devic
     # image = self.aug.get_transform(original_image).apply_image(original_image)
     # # image = torch.as_tensor(image.transpose(2, 0, 1).astype("float32"))
     # image = torch.as_tensor(image.astype("float32"))
+    print("ASDASDQWEQWEF", batched_inputs[0]["image"].dim(), "\n\n\n\n\n")
     images = [x["image"].unsqueeze(0) for x in batched_inputs]
     images = ImageList.from_tensors(images, size_divisibility)
 
