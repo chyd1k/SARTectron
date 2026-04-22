@@ -154,27 +154,99 @@ class COCOEvaluator(DatasetEvaluator):
             self._eval_predictions(set(self._tasks), predictions)
         # Copy so the caller can do whatever with results
         return copy.deepcopy(self._results)
+    
+
+    def _compute_confusion_matrix(self, iou_threshold=0.5, conf_threshold=0.5):
+        tp, fp, fn = 0, 0, 0
+        
+        reverse_id_mapping = {}
+        if hasattr(self._metadata, "thing_dataset_id_to_contiguous_id"):
+            reverse_id_mapping = {v: k for k, v in self._metadata.thing_dataset_id_to_contiguous_id.items()}
+        
+        pred_cocos = list(itertools.chain(*[x["instances"] for x in self._predictions]))
+        matched_gt_ids = set()
+        
+        for pred in pred_cocos:
+            if pred["score"] < conf_threshold:
+                continue
+            
+            pred_cat_id = pred["category_id"]
+            orig_pred_cat_id = reverse_id_mapping.get(pred_cat_id, pred_cat_id)
+            img_id = pred["image_id"]
+            
+            gt_ids = self._coco_api.getAnnIds(imgIds=img_id)
+            gt_anns = self._coco_api.loadAnns(gt_ids)
+            
+            best_iou = 0
+            matched_gt_id = None
+            
+            for gt in gt_anns:
+                if gt["id"] in matched_gt_ids:
+                    continue
+                if gt["category_id"] != orig_pred_cat_id:
+                    continue
+                    
+                bbox_gt = gt["bbox"]
+                iou = self._compute_iou(pred["bbox"], bbox_gt)
+                if iou > iou_threshold and iou > best_iou:
+                    best_iou = iou
+                    matched_gt_id = gt["id"]
+            
+            if best_iou > iou_threshold and matched_gt_id:
+                tp += 1
+                matched_gt_ids.add(matched_gt_id)
+            else:
+                fp += 1
+        
+        all_gt_ids = set()
+        for img_id in set(p["image_id"] for p in self._predictions):
+            gt_ids = self._coco_api.getAnnIds(imgIds=img_id)
+            all_gt_ids.update(gt_ids)
+        
+        fn = len(all_gt_ids - matched_gt_ids)
+        
+        return tp, fp, fn
+
+
+    def _compute_iou(self, box1, box2):
+        # bbox -> XYXY
+        x1_1, y1_1, w1, h1 = box1
+        x1_2, y1_2, w2, h2 = box2
+        
+        # Convert XYWH -> XYXY
+        x2_1 = x1_1 + w1
+        y2_1 = y1_1 + h1
+        x2_2 = x1_2 + w2  
+        y2_2 = y1_2 + h2
+        
+        # Interselection
+        x1 = max(x1_1, x1_2)
+        y1 = max(y1_1, y1_2)
+        x2 = min(x2_1, x2_2)
+        y2 = min(y2_1, y2_2)
+        
+        inter = max(0, x2 - x1) * max(0, y2 - y1)
+        
+        # Areas
+        area1 = w1 * h1
+        area2 = w2 * h2
+        union = area1 + area2 - inter
+        
+        iou = inter / union if union > 0 else 0
+        return iou
+
 
     def _eval_predictions(self, tasks, predictions):
-        """
-        Evaluate predictions on the given tasks.
-        Fill self._results with the metrics of the tasks.
-        """
+        """F1/Precision/Recall for different IoU + TP/FP/FN."""
         self._logger.info("Preparing results for COCO format ...")
         coco_results = list(itertools.chain(*[x["instances"] for x in predictions]))
 
-        # unmap the category ids for COCO
+        # unmap category ids
         if hasattr(self._metadata, "thing_dataset_id_to_contiguous_id"):
-            reverse_id_mapping = {
-                v: k for k, v in self._metadata.thing_dataset_id_to_contiguous_id.items()
-            }
+            reverse_id_mapping = {v: k for k, v in self._metadata.thing_dataset_id_to_contiguous_id.items()}
             for result in coco_results:
                 category_id = result["category_id"]
-                assert (
-                    category_id in reverse_id_mapping
-                ), "A prediction has category_id={}, which is not available in the dataset.".format(
-                    category_id
-                )
+                assert category_id in reverse_id_mapping
                 result["category_id"] = reverse_id_mapping[category_id]
 
         if self._output_dir:
@@ -182,34 +254,54 @@ class COCOEvaluator(DatasetEvaluator):
             self._logger.info("Saving results to {}".format(file_path))
             with PathManager.open(file_path, "w") as f:
                 f.write(json.dumps(coco_results))
-                f.flush()
 
         if not self._do_evaluation:
-            self._logger.info("Annotations are not available for evaluation.")
             return
 
-        self._logger.info(
-            "Evaluating predictions with {} COCO API...".format(
-                "unofficial" if self._use_fast_impl else "official"
-            )
-        )
+        self._logger.info("Evaluating predictions with {} COCO API...".format(
+            "unofficial" if self._use_fast_impl else "official"))
+
+        iou_thresholds = [0.25, 0.50, 0.75]
+
         for task in sorted(tasks):
-            coco_eval = (
-                _evaluate_predictions_on_coco(
-                    self._coco_api,
-                    coco_results,
-                    task,
-                    kpt_oks_sigmas=self._kpt_oks_sigmas,
-                    use_fast_impl=self._use_fast_impl,
-                )
-                if len(coco_results) > 0
-                else None  # cocoapi does not handle empty results very well
-            )
+            coco_eval = (_evaluate_predictions_on_coco(
+                self._coco_api, coco_results, task,
+                kpt_oks_sigmas=self._kpt_oks_sigmas,
+                use_fast_impl=self._use_fast_impl,
+            ) if len(coco_results) > 0 else None)
 
             res = self._derive_coco_results(
-                coco_eval, task, class_names=self._metadata.get("thing_classes")
-            )
+                coco_eval, task, class_names=self._metadata.get("thing_classes"))
             self._results[task] = res
+
+            if task == "bbox" and coco_eval is not None:
+                # F1/P/R for different IoU -> save in JSON
+                for iou_thresh in iou_thresholds:
+                    iou_name = f"[IoU={iou_thresh}]"
+                    
+                    tp, fp, fn = self._compute_confusion_matrix(iou_threshold=iou_thresh)
+                    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+                    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+                    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+                    
+                    # Save in JSON
+                    res[f"Precision@{iou_name}"] = float(precision * 100)
+                    res[f"Recall@{iou_name}"] = float(recall * 100)
+                    res[f"F1@{iou_name}"] = float(f1 * 100)
+
+                # TP/FP/FN only in console
+                self._logger.info("Validation logs:")
+                for iou_thresh in iou_thresholds:
+                    tp, fp, fn = self._compute_confusion_matrix(iou_threshold=iou_thresh)
+                    precision = tp / (tp + fp) if (tp + fp) > 0 else 0
+                    recall = tp / (tp + fn) if (tp + fn) > 0 else 0
+                    f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
+                    
+                    self._logger.info(f"IoU>={iou_thresh:4.2f} -> TP:{tp:4d}, FP:{fp:4d}, FN:{fn:4d} -> "
+                                    f"Precision:{precision:.1%}, Recall:{recall:.1%}, F1:{f1:.1%}")
+
+                self._logger.info("="*70)
+
 
     def _eval_box_proposals(self, predictions):
         """
@@ -251,19 +343,6 @@ class COCOEvaluator(DatasetEvaluator):
         self._results["box_proposals"] = res
 
     def _derive_coco_results(self, coco_eval, iou_type, class_names=None):
-        """
-        Derive the desired score numbers from summarized COCOeval.
-
-        Args:
-            coco_eval (None or COCOEval): None represents no predictions from model.
-            iou_type (str):
-            class_names (None or list[str]): if provided, will use it to predict
-                per-category AP.
-
-        Returns:
-            a dict of {metric name: score}
-        """
-
         metrics = {
             "bbox": ["AP", "AP50", "AP75", "APs", "APm", "APl"],
             "segm": ["AP", "AP50", "AP75", "APs", "APm", "APl"],
@@ -274,50 +353,70 @@ class COCOEvaluator(DatasetEvaluator):
             self._logger.warn("No predictions from the model!")
             return {metric: float("nan") for metric in metrics}
 
-        # the standard metrics
         results = {
             metric: float(coco_eval.stats[idx] * 100 if coco_eval.stats[idx] >= 0 else "nan")
             for idx, metric in enumerate(metrics)
         }
-        self._logger.info(
-            "Evaluation results for {}: \n".format(iou_type) + create_small_table(results)
-        )
-        if not np.isfinite(sum(results.values())):
-            self._logger.info("Some metrics cannot be computed and is shown as NaN.")
 
-        if class_names is None or len(class_names) <= 1:
-            return results
-        # Compute per-category AP
-        # from https://github.com/facebookresearch/Detectron/blob/a6a835f5b8208c45d0dce217ce9bbda915f44df7/detectron/datasets/json_dataset_evaluator.py#L222-L252 # noqa
-        precisions = coco_eval.eval["precision"]
-        # precision has dims (iou, recall, cls, area range, max dets)
-        assert len(class_names) == precisions.shape[2]
+        if iou_type == "bbox" and hasattr(coco_eval.eval, 'precision'):
+            precisions = coco_eval.eval['precision']  # [T=10,R=101,C,K,A=4,M=3]
+            recalls = coco_eval.eval['recall']        # [T=10,R=101,A=4,M=3]
+            
+            iou_indices = {0.5: 0, 0.75: 6, 0.95: 9}
+            
+            for iou_thresh, iou_idx in iou_indices.items():
+                p = np.mean(precisions[iou_idx, :, :, 0, 2][precisions[iou_idx, :, :, 0, 2] > -1])
+                r = np.mean(recalls[iou_idx, :, 2, 0]) if recalls[iou_idx, :, 2, 0].size > 0 else 0
+                
+                results[f"P@[IoU={iou_thresh}]"] = float(p * 100)
+                results[f"R@[IoU={iou_thresh}]"] = float(r * 100)
+                
+                # F1-score
+                if p > 0 and r > 0:
+                    f1 = 2 * p * r / (p + r)
+                    results[f"F1@[IoU={iou_thresh}]"] = float(f1 * 100)
 
-        results_per_category = []
-        for idx, name in enumerate(class_names):
-            # area range index 0: all area ranges
-            # max dets index -1: typically 100 per image
-            precision = precisions[:, :, idx, 0, -1]
-            precision = precision[precision > -1]
-            ap = np.mean(precision) if precision.size else float("nan")
-            results_per_category.append(("{}".format(name), float(ap * 100)))
+            valid_prec = precisions[0, :, 0, 0, 2][precisions[0, :, 0, 0, 2] > -1]  # IoU=0.5
+            if len(valid_prec) > 1:
+                recalls_auc = np.linspace(0, 1, len(valid_prec))
+                auc = np.trapz(valid_prec, recalls_auc)
+                results["AUC@[IoU=0.5]"] = float(auc * 100)
 
-        # tabulate it
-        N_COLS = min(6, len(results_per_category) * 2)
-        results_flatten = list(itertools.chain(*results_per_category))
-        results_2d = itertools.zip_longest(*[results_flatten[i::N_COLS] for i in range(N_COLS)])
-        table = tabulate(
-            results_2d,
-            tablefmt="pipe",
-            floatfmt=".3f",
-            headers=["category", "AP"] * (N_COLS // 2),
-            numalign="left",
-        )
-        self._logger.info("Per-category {} AP: \n".format(iou_type) + table)
+        rename_map = {
+            "AP": "AP@[IoU=0.5:0.95]", "AP50": "AP@[IoU=0.5]", 
+            "AP75": "AP@[IoU=0.75]", "APs": "AP@[small]", 
+            "APm": "AP@[medium]", "APl": "AP@[large]"
+        }
+        results = {rename_map.get(k, k): v for k, v in results.items()}
 
-        results.update({"AP-" + name: ap for name, ap in results_per_category})
+        self._logger.info("Evaluation results for {}: \n".format(iou_type) + 
+                        create_small_table(results))
+
+        if class_names is not None and len(class_names) > 1:
+            precisions = coco_eval.eval["precision"]
+            assert len(class_names) == precisions.shape[2]
+
+            results_per_category = []
+            for idx, name in enumerate(class_names):
+                precision = precisions[:, :, idx, 0, -1]
+                precision = precision[precision > -1]
+                ap = np.mean(precision) if precision.size else float("nan")
+                results_per_category.append((name, float(ap * 100)))
+
+            N_COLS = min(6, len(results_per_category) * 2)
+            results_flatten = list(itertools.chain(*results_per_category))
+            results_2d = itertools.zip_longest(*[results_flatten[i::N_COLS] for i in range(N_COLS)])
+            table = tabulate(
+                results_2d,
+                tablefmt="pipe",
+                floatfmt=".3f",
+                headers=["category", "AP"] * (N_COLS // 2),
+                numalign="left",
+            )
+            self._logger.info("Per-category {} AP: \n".format(iou_type) + table)
+            results.update({"AP-" + name: ap for name, ap in results_per_category})
+
         return results
-
 
 def instances_to_coco_json(instances, img_id):
     """

@@ -480,7 +480,7 @@ py::dict Accumulate(
   struct tm local_time;
   std::array<char, 200> buffer;
   time(&rawtime);
-  localtime_s(&local_time, &rawtime);
+  localtime_r(&rawtime, &local_time);
   strftime(
       buffer.data(), 200, "%Y-%m-%d %H:%num_max_detections:%S", &local_time);
   return py::dict(

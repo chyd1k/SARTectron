@@ -98,6 +98,8 @@ class LossEvalHook(HookBase):
 
 
     def after_step(self):
+        if 'AP' in self.trainer.storage.latest():  
+            return
         next_iter = self.trainer.iter + 1
         is_final = next_iter == self.trainer.max_iter
         if is_final or (self._period > 0 and next_iter % self._period == 0):

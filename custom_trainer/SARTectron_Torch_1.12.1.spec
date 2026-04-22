@@ -14,11 +14,12 @@ a = Analysis(['SARTectron.py'],
 	     ],
              binaries=[],
 	     datas=[
-		('C:\\Users\\photomod\\miniconda3\\envs\\setki\\Library\\bin\\libiomp5md.dll', '.'),
+		('C:\\Users\\photomod\\miniconda3\\envs\\setki4\\Library\\bin\\libiomp5md.dll', '.'),
 		(os.path.join(site_packages, "torch-1.12.1-py3.8.egg-info"), "torch-1.12.1-py3.8.egg-info"),
 		(os.path.join(site_packages, "fvcore"), "fvcore"),
 		(os.path.join(site_packages, "torch"), "torch"),
-		(os.path.join(site_packages, "torchvision"), "torchvision")
+		(os.path.join(site_packages, "torchvision"), "torchvision"),
+		(os.path.join(site_packages, "pycocotools"), "pycocotools")
 	     ],
 	     hiddenimports=[os.path.join(site_packages,"torch-1.12.1-py3.8.egg-info"), 'fvcore', 'torch', 'torchvision'],
              hookspath=[],

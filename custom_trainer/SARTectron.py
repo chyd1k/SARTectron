@@ -7,7 +7,7 @@ import torch.jit
 torch.jit.script_method = script_method
 torch.jit.script = script
 
-import os, sys, torch, gc, time, cv2, copy, re, json
+import os, sys, torch, gc, time, cv2, copy, re, json, configparser
 from multiprocessing import Process, freeze_support
 # sys.path.append('D:/detectron2/detectron2')
 
@@ -72,7 +72,7 @@ class CustomTrainerAndVal(DefaultTrainer):
     def build_evaluator(cls, cfg, dataset_name, output_folder=None):
         if output_folder is None:
             output_folder = os.path.join(cfg.OUTPUT_DIR, "inference")
-        return COCOEvaluator(dataset_name, cfg, True, output_folder)
+        return COCOEvaluator(dataset_name, cfg, True, output_folder, use_fast_impl=False)
 
     def build_hooks(self):
         hooks = super().build_hooks()
@@ -193,7 +193,7 @@ def write_cfg(cfg, full_cfg_path):
 
 
 def reg_dataset(name, imgs_folder, annotation_path):
-    dcs = load_coco_json(annotation_path, imgs_folder, dataset_name=name)    
+    dcs = load_coco_json(annotation_path, imgs_folder, dataset_name=name)
     thing_colors = [tuple(np.random.choice(range(256), size=3)) for _ in MetadataCatalog.get(name).thing_classes]
     metadata = {
         "thing_colors" : thing_colors
@@ -536,8 +536,110 @@ def parse_params():
     # }
 
 
+def parse_params_from_config(config_path="config.ini"):
+    sys.setrecursionlimit(40000)
+    
+    config = configparser.ConfigParser()
+    config.optionxform = str
+    config.read(config_path)
+    
+    nntrain_config = dict(config['NNTrain'])
+    
+    # Преобразуем строковые значения в правильные типы
+    nntrain_config['NumClasses'] = int(nntrain_config['NumClasses'])
+    nntrain_config['MaxIter'] = int(nntrain_config['MaxIter'])
+    nntrain_config['CheckpointPeriod'] = int(nntrain_config['CheckpointPeriod'])
+    nntrain_config['TestEvalPeriod'] = int(nntrain_config['TestEvalPeriod'])
+    nntrain_config['BaseLearningRate'] = float(nntrain_config['BaseLearningRate'])
+    nntrain_config['RPNPositiveFraction'] = float(nntrain_config['RPNPositiveFraction'])
+    nntrain_config['RoiHeadsPositiveFraction'] = float(nntrain_config['RoiHeadsPositiveFraction'])
+    nntrain_config['MinSizeTrain'] = int(nntrain_config['MinSizeTrain'])
+    nntrain_config['MaxSizeTrain'] = int(nntrain_config['MaxSizeTrain'])
+    nntrain_config['MinSizeTest'] = int(nntrain_config['MinSizeTest'])
+    nntrain_config['MaxSizeTest'] = int(nntrain_config['MaxSizeTest'])
+    nntrain_config['RPNBatchSizePerImg'] = int(nntrain_config['RPNBatchSizePerImg'])
+    nntrain_config['RoiHeadsBatchSizePerImg'] = int(nntrain_config['RoiHeadsBatchSizePerImg'])
+    nntrain_config['TestDetectionsPerImage'] = int(nntrain_config['TestDetectionsPerImage'])
+    nntrain_config['PreNMSTopkTrain'] = int(nntrain_config['PreNMSTopkTrain'])
+    nntrain_config['PostNMSTopkTrain'] = int(nntrain_config['PostNMSTopkTrain'])
+    nntrain_config['PreNMSTopkTest'] = int(nntrain_config['PreNMSTopkTest'])
+    nntrain_config['PostNMSTopkTest'] = int(nntrain_config['PostNMSTopkTest'])
+    nntrain_config['NumWorkers'] = int(nntrain_config['NumWorkers'])
+    nntrain_config['ImgsPerBatch'] = int(nntrain_config['ImgsPerBatch'])
+    nntrain_config['FilterEmptyAnn'] = bool(int(nntrain_config['FilterEmptyAnn']))
+    nntrain_config['CPU'] = bool(int(nntrain_config['CPU']))
+    # nntrain_config['CPU'] = True
+
+    nntrain_config['ClassesNames'] = [nntrain_config['ClassesNames'].strip()]
+    nntrain_config['ExpectedShapes'] = [int(x) for x in nntrain_config['ExpectedShapes'].split(',')]
+    
+    class Options:
+        pass
+    
+    options = Options()
+    options.train_network = True
+    options.test_from_dir = False
+    
+    options.train_ann_path = nntrain_config['TrainJson']
+    options.test_ann_path = nntrain_config['TestJson']
+    options.OUTPUT_DIR = nntrain_config['SavingPath']
+    options.MODEL_ROI_HEADS_NUM_CLASSES = nntrain_config['NumClasses']
+    options.CLASSES_NAMES = nntrain_config['ClassesNames']
+    options.ANCHOR_GENERATOR_EXPECTED_SHAPES = [nntrain_config['ExpectedShapes']]
+    options.MODEL_WEIGHTS = nntrain_config.get('InputWeightsPath', '')
+    options.TEST_EVAL_PERIOD = nntrain_config['TestEvalPeriod']
+    options.MODEL_DEVICE = "cpu" if nntrain_config['CPU'] else "cuda"
+    options.INPUT_MIN_SIZE_TRAIN = nntrain_config['MinSizeTrain']
+    options.INPUT_MAX_SIZE_TRAIN = nntrain_config['MaxSizeTrain']
+    options.INPUT_MIN_SIZE_TEST = nntrain_config['MinSizeTest']
+    options.INPUT_MAX_SIZE_TEST = nntrain_config['MaxSizeTest']
+    options.DATALOADER_NUM_WORKERS = nntrain_config['NumWorkers']
+    options.DATALOADER_FILTER_EMPTY_ANNOTATIONS = nntrain_config['FilterEmptyAnn']
+    options.MODEL_RPN_BATCH_SIZE_PER_IMAGE = nntrain_config['RPNBatchSizePerImg']
+    options.MODEL_ROI_HEADS_BATCH_SIZE_PER_IMAGE = nntrain_config['RoiHeadsBatchSizePerImg']
+    options.MODEL_RPN_POS_FRACTION = nntrain_config['RPNPositiveFraction']
+    options.MODEL_ROI_HEADS_POS_FRACTION = nntrain_config['RoiHeadsPositiveFraction']
+    options.SOLVER_IMS_PER_BATCH = nntrain_config['ImgsPerBatch']
+    options.SOLVER_CHECKPOINT_PERIOD = nntrain_config['CheckpointPeriod']
+    options.SOLVER_BASE_LR = nntrain_config['BaseLearningRate']
+    options.SOLVER_MAX_ITER = nntrain_config['MaxIter']
+    options.MODEL_RPN_PRE_NMS_TOPK_TRAIN = nntrain_config['PreNMSTopkTrain']
+    options.MODEL_RPN_POST_NMS_TOPK_TRAIN = nntrain_config['PostNMSTopkTrain']
+    options.MODEL_RPN_PRE_NMS_TOPK_TEST = nntrain_config['PreNMSTopkTest']
+    options.MODEL_RPN_POST_NMS_TOPK_TEST = nntrain_config['PostNMSTopkTest']
+    options.TEST_DETECTIONS_PER_IMAGE = nntrain_config['TestDetectionsPerImage']
+    
+    # Дополнительные поля для совместимости (если используются)
+    options.NAME_OF_TRAIN_DATASET = "train_dataset_planes"
+    options.NAME_OF_TEST_DATASET = "test_dataset_planes"
+    options.BASE_CFG_PATH = "C:/PHOTOMOD Radar/SARTectron/configs/faster_rcnn_X_101_32x8d_FPN_3x.yaml"  # faster_rcnn_R_50_FPN_3x.yaml"
+    options.train_folder = os.path.abspath(options.train_ann_path)
+    options.test_folder = os.path.abspath(options.test_ann_path)
+    options.yaml_file = ""
+    options.testing_folder = os.path.abspath(options.test_ann_path)
+    options.saving_folder = os.path.abspath(options.test_ann_path)
+    
+    print("Параметры загружены из [NNTrain]:")
+    print(f"   Train: {options.train_ann_path}")
+    print(f"   Test:  {options.test_ann_path}")
+    print(f"   Save:  {options.OUTPUT_DIR}")
+    print(f"   Classes: {options.CLASSES_NAMES}")
+    print(f"   Iterations: {options.SOLVER_MAX_ITER}")
+    print(f"   Eval every: {options.TEST_EVAL_PERIOD} iter")
+    print(f"   Batch size: {options.SOLVER_IMS_PER_BATCH}")
+    print(f"   Device: {options.MODEL_DEVICE}")
+    
+    return options
+
+
+def run_training_from_config(config_path="config.ini"):
+    options = parse_params_from_config(config_path)
+    TrainBegin(options)
+
+
 def main():
     parse_params()
+    # run_training_from_config('D:/Radar/Datasets/_weights/Dissertation_Experiments/Experiment 6/ChaoHU_and_Synthetic_500imgs_new/train.trn')
 
     # cfg_name = "sartectron_config.yaml"
     # cfg_path = "C:/Radar/Datasets/Tucson_Project/Weights_CondorScaled_TerrasarDescending/" + cfg_name
@@ -576,4 +678,5 @@ def main():
 
 if __name__ == "__main__":
     freeze_support()
-    Process(target=main).start()
+    main()
+    # Process(target=main).start()
