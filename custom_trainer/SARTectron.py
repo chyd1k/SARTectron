@@ -6,6 +6,7 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
 import torch.jit
 torch.jit.script_method = script_method
 torch.jit.script = script
+import torch
 
 import os, sys, torch, gc, time, cv2, copy, re, json, configparser
 from multiprocessing import Process, freeze_support
@@ -16,11 +17,11 @@ from LossEvalHook import LossEvalHook
 from optparse import OptionParser
 
 from detectron2.config import get_cfg
-from detectron2.data import MetadataCatalog
+from detectron2.data import MetadataCatalog, DatasetCatalog
 from detectron2.data.datasets import load_coco_json, register_coco_instances
 from detectron2.data import build_detection_test_loader, build_detection_train_loader
 from detectron2.data import DatasetMapper
-from detectron2.engine import DefaultTrainer
+from detectron2.engine import DefaultTrainer, launch
 from detectron2.evaluation import COCOEvaluator
 from detectron2.modeling import build_model
 from detectron2.checkpoint import DetectionCheckpointer
@@ -47,8 +48,9 @@ def custom_mapper(dataset_list):
         # T.RandomSaturation(0.8, 1.4),
         # T.RandomRotation(angle=[90, 90]),
         # T.RandomLighting(0.7),
-        # T.RandomFlip(prob=0.4, horizontal=False, vertical=True),
-        ]
+        T.RandomFlip(prob=0.2, horizontal=True, vertical=False),
+        T.RandomFlip(prob=0.2, horizontal=False, vertical=True),
+    ]
     image, transforms = T.apply_transform_gens(transform_list, image)
     # dataset_list["image"] = torch.as_tensor(image.transpose(2, 0, 1).astype("float32"))
     dataset_list["image"] = torch.as_tensor(image.astype("float32"))
@@ -192,14 +194,18 @@ def write_cfg(cfg, full_cfg_path):
     return full_cfg_path
 
 
-def reg_dataset(name, imgs_folder, annotation_path):
-    dcs = load_coco_json(annotation_path, imgs_folder, dataset_name=name)
-    thing_colors = [tuple(np.random.choice(range(256), size=3)) for _ in MetadataCatalog.get(name).thing_classes]
-    metadata = {
-        "thing_colors" : thing_colors
-    }
-    register_coco_instances(name, metadata, annotation_path, imgs_folder)
-    return dcs
+def reg_dataset(name, imgs_folder, annotation_path, classes):
+    if name not in DatasetCatalog.list():
+        register_coco_instances(name, {}, annotation_path, imgs_folder)
+
+    metadata = MetadataCatalog.get(name)
+    metadata.thing_classes = classes
+
+    if not hasattr(metadata, "thing_colors"):
+        metadata.thing_colors = [
+            tuple(np.random.randint(0, 256, 3))
+            for _ in classes
+        ]
 
 
 def set_cfg_params(params, base_cfg_path = ""):
@@ -250,6 +256,34 @@ def set_cfg_params(params, base_cfg_path = ""):
     return cfg
 
 
+def train_func(cfg, train_imgs_folder, test_imgs_folder, train_annotation_path,test_annotation_path):
+    has_val = not (
+        len(cfg.DATASETS.TEST) == 0 or
+        cfg.DATASETS.TEST[0] == "" or
+        test_imgs_folder == "" or
+        test_annotation_path == ""
+    )
+    reg_dataset(
+        cfg.DATASETS.TRAIN[0],
+        train_imgs_folder,
+        train_annotation_path,
+        cfg.DATASETS.CLASSES_NAMES
+    )
+    if has_val:
+        reg_dataset(
+            cfg.DATASETS.TEST[0],
+            test_imgs_folder,
+            test_annotation_path,
+            cfg.DATASETS.CLASSES_NAMES
+        )
+        trainer = CustomTrainerAndVal(cfg)
+    else:
+        trainer = CustomTrainerNoVal(cfg)
+
+    trainer.resume_or_load(resume=cfg.MODEL.WEIGHTS[-4:] == ".pth")
+    trainer.train()
+
+
 def TrainBegin(options):
     train_imgs_folder = options.train_folder
     test_imgs_folder = options.test_folder
@@ -261,79 +295,70 @@ def TrainBegin(options):
     outp_weights_path = options.OUTPUT_DIR
     base_cfg_path = options.BASE_CFG_PATH
 
-    # options.ANCHOR_GENERATOR_EXPECTED_SHAPES = "[[100, 150], [108, 234], [57, 130], [53, 97]]"
-    if (len(options.ANCHOR_GENERATOR_EXPECTED_SHAPES) == 0):
+    if len(options.ANCHOR_GENERATOR_EXPECTED_SHAPES) == 0:
         print(colors["red"] + "Pass expected object shapes to program with --ANCHOR_GENERATOR_EXPECTED_SHAPES command.", flush=True)
         return
-    
+
     if (len(options.CLASSES_NAMES) == 0) or (len(options.CLASSES_NAMES) != int(options.MODEL_ROI_HEADS_NUM_CLASSES)):
         print(colors["red"] + "Pass classes names and number of classes via --CLASSES_NAMES and --MODEL_ROI_HEADS_NUM_CLASSES commands.", flush=True)
         return
 
     params = {
-        "MODEL_WEIGHTS" : options.MODEL_WEIGHTS,
-
-        "NAME_OF_TRAIN_DATASET" : options.NAME_OF_TRAIN_DATASET,
-        "NAME_OF_TEST_DATASET" : options.NAME_OF_TEST_DATASET,
-        "OUTPUT_DIR" : options.OUTPUT_DIR,
-        "BASE_CFG_PATH" : options.BASE_CFG_PATH,
-
-        "TEST_EVAL_PERIOD" : options.TEST_EVAL_PERIOD,
-        "MODEL_DEVICE" : options.MODEL_DEVICE,
-        "INPUT_MIN_SIZE_TRAIN" : (options.INPUT_MIN_SIZE_TRAIN,),
-        "INPUT_MAX_SIZE_TRAIN" : options.INPUT_MAX_SIZE_TRAIN,
-        "INPUT_MIN_SIZE_TEST" : options.INPUT_MIN_SIZE_TEST,
-        "INPUT_MAX_SIZE_TEST" : options.INPUT_MAX_SIZE_TEST,
-        "DATALOADER_NUM_WORKERS" : options.DATALOADER_NUM_WORKERS,
-        "DATALOADER_FILTER_EMPTY_ANNOTATIONS" : options.DATALOADER_FILTER_EMPTY_ANNOTATIONS,
-        "MODEL_RPN_BATCH_SIZE_PER_IMAGE" : options.MODEL_RPN_BATCH_SIZE_PER_IMAGE,
-        "MODEL_ROI_HEADS_BATCH_SIZE_PER_IMAGE" : options.MODEL_ROI_HEADS_BATCH_SIZE_PER_IMAGE,
-        "MODEL_RPN_POS_FRACTION" : options.MODEL_RPN_POS_FRACTION,
-        "MODEL_ROI_HEADS_POS_FRACTION" : options.MODEL_ROI_HEADS_POS_FRACTION,
-        "SOLVER_IMS_PER_BATCH" : options.SOLVER_IMS_PER_BATCH,
-        "SOLVER_CHECKPOINT_PERIOD" : options.SOLVER_CHECKPOINT_PERIOD,
-        "SOLVER_BASE_LR" : options.SOLVER_BASE_LR,
-        "SOLVER_MAX_ITER" : options.SOLVER_MAX_ITER,
-        "MODEL_ROI_HEADS_NUM_CLASSES" : options.MODEL_ROI_HEADS_NUM_CLASSES,
-        "MODEL_RPN_PRE_NMS_TOPK_TRAIN" : options.MODEL_RPN_PRE_NMS_TOPK_TRAIN,
-        "MODEL_RPN_PRE_NMS_TOPK_TEST" : options.MODEL_RPN_PRE_NMS_TOPK_TEST,
-        "MODEL_RPN_POST_NMS_TOPK_TRAIN" : options.MODEL_RPN_POST_NMS_TOPK_TRAIN,
-        "MODEL_RPN_POST_NMS_TOPK_TEST" : options.MODEL_RPN_POST_NMS_TOPK_TEST,
-        "TEST_DETECTIONS_PER_IMAGE" : options.TEST_DETECTIONS_PER_IMAGE,
-        "ANCHOR_GENERATOR_EXPECTED_SHAPES" : options.ANCHOR_GENERATOR_EXPECTED_SHAPES,
-        "CLASSES_NAMES" : options.CLASSES_NAMES
-        # "RADAR_NMS" : options.RADAR_NMS
+        "MODEL_WEIGHTS": options.MODEL_WEIGHTS,
+        "NAME_OF_TRAIN_DATASET": options.NAME_OF_TRAIN_DATASET,
+        "NAME_OF_TEST_DATASET": options.NAME_OF_TEST_DATASET,
+        "OUTPUT_DIR": options.OUTPUT_DIR,
+        "BASE_CFG_PATH": options.BASE_CFG_PATH,
+        "TEST_EVAL_PERIOD": options.TEST_EVAL_PERIOD,
+        "MODEL_DEVICE": options.MODEL_DEVICE,
+        "INPUT_MIN_SIZE_TRAIN": (options.INPUT_MIN_SIZE_TRAIN,),
+        "INPUT_MAX_SIZE_TRAIN": options.INPUT_MAX_SIZE_TRAIN,
+        "INPUT_MIN_SIZE_TEST": options.INPUT_MIN_SIZE_TEST,
+        "INPUT_MAX_SIZE_TEST": options.INPUT_MAX_SIZE_TEST,
+        "DATALOADER_NUM_WORKERS": options.DATALOADER_NUM_WORKERS,
+        "DATALOADER_FILTER_EMPTY_ANNOTATIONS": options.DATALOADER_FILTER_EMPTY_ANNOTATIONS,
+        "MODEL_RPN_BATCH_SIZE_PER_IMAGE": options.MODEL_RPN_BATCH_SIZE_PER_IMAGE,
+        "MODEL_ROI_HEADS_BATCH_SIZE_PER_IMAGE": options.MODEL_ROI_HEADS_BATCH_SIZE_PER_IMAGE,
+        "MODEL_RPN_POS_FRACTION": options.MODEL_RPN_POS_FRACTION,
+        "MODEL_ROI_HEADS_POS_FRACTION": options.MODEL_ROI_HEADS_POS_FRACTION,
+        "SOLVER_IMS_PER_BATCH": options.SOLVER_IMS_PER_BATCH,
+        "SOLVER_CHECKPOINT_PERIOD": options.SOLVER_CHECKPOINT_PERIOD,
+        "SOLVER_BASE_LR": options.SOLVER_BASE_LR,
+        "SOLVER_MAX_ITER": options.SOLVER_MAX_ITER,
+        "MODEL_ROI_HEADS_NUM_CLASSES": options.MODEL_ROI_HEADS_NUM_CLASSES,
+        "MODEL_RPN_PRE_NMS_TOPK_TRAIN": options.MODEL_RPN_PRE_NMS_TOPK_TRAIN,
+        "MODEL_RPN_PRE_NMS_TOPK_TEST": options.MODEL_RPN_PRE_NMS_TOPK_TEST,
+        "MODEL_RPN_POST_NMS_TOPK_TRAIN": options.MODEL_RPN_POST_NMS_TOPK_TRAIN,
+        "MODEL_RPN_POST_NMS_TOPK_TEST": options.MODEL_RPN_POST_NMS_TOPK_TEST,
+        "TEST_DETECTIONS_PER_IMAGE": options.TEST_DETECTIONS_PER_IMAGE,
+        "ANCHOR_GENERATOR_EXPECTED_SHAPES": options.ANCHOR_GENERATOR_EXPECTED_SHAPES,
+        "CLASSES_NAMES": options.CLASSES_NAMES,
     }
 
-    train_dcs = reg_dataset(name_train_dataset, train_imgs_folder, train_annotation_path)
-    if (name_test_dataset  != "") and (test_imgs_folder != "") and (test_annotation_path):
-        test_dcs = reg_dataset(name_test_dataset, test_imgs_folder, test_annotation_path)
-
-    # base_cfg_path = "configs/Base-RCNN-FPN.yaml"
     cfg = set_cfg_params(params, base_cfg_path)
 
-    # write config
     cfg_name = "sartectron_config.yaml"
-    cfg_name = write_cfg(cfg, outp_weights_path + "/" + cfg_name)
+    cfg_name = write_cfg(cfg, os.path.join(outp_weights_path, cfg_name))
 
-    # Validation set is exist
-    if (name_test_dataset  != "") and (test_imgs_folder != "") and (test_annotation_path):
-        trainer = CustomTrainerAndVal(cfg)
-        if (options.MODEL_WEIGHTS[-4:] == ".pth"):
-            cfg.MODEL_WEIGHTS = options.MODEL_WEIGHTS
-            trainer.resume_or_load(resume = True)
-        else:
-            trainer.resume_or_load(resume = False)
-        trainer.train()
+    num_gpus = torch.cuda.device_count()
+    print(f"{colors['green']}Starting Training on {num_gpus} GPUs.", flush=True)
+
+    if num_gpus == 0:
+        print(f"{colors['green']}No GPUs detected, falling back to CPU.", flush=True)
+        train_func(cfg, train_imgs_folder, test_imgs_folder,
+                   train_annotation_path,test_annotation_path)
     else:
-        trainer = CustomTrainerNoVal(cfg)
-        if (options.MODEL_WEIGHTS[-4:] == ".pth"):
-            cfg.MODEL_WEIGHTS = options.MODEL_WEIGHTS
-            trainer.resume_or_load(resume = True)
-        else:
-            trainer.resume_or_load(resume = False)
-        trainer.train()
-    return
+        launch(
+            train_func,
+            num_gpus_per_machine=num_gpus,
+            num_machines=1,
+            machine_rank=0,
+            dist_url="auto",
+            args=(
+                cfg, train_imgs_folder, test_imgs_folder,
+                train_annotation_path,test_annotation_path
+            ),
+        )
 
 
 def detecting_from_dir(testing_dir, saving_dir, cfg):
@@ -416,7 +441,6 @@ def detecting_from_dir(testing_dir, saving_dir, cfg):
             json.dump(shape_json, f, indent=4)
 
     print("\n--- Time spend for detection: %s seconds ---" % (time.time() - start_time), flush=True)
-    return
 
 
 def TestBegin(options):
@@ -432,7 +456,6 @@ def TestBegin(options):
         return
 
     detecting_from_dir(options.testing_folder, options.saving_folder, cfg)
-    return
 
 
 def foo_callback_dgt(option, opt, value, parser):
@@ -455,12 +478,12 @@ def parse_params():
     parser.add_option("--train", "--train_network", dest="train_network", help="Set SARTectron in training mode.", action="store_true", default=False)
 
     parser.add_option("--tr_f", "--train_folder", dest="train_folder", help="Path to folder with training data.")
-    parser.add_option("--tst_f", "--test_folder", dest="test_folder", help="Path to folder with testing data.")
+    parser.add_option("--tst_f", "--test_folder", dest="test_folder", help="Path to folder with testing data.", default = "")
     parser.add_option("--tr_ann_p", "--train_ann_path", dest="train_ann_path", help="Path to train annotation json-file.")
-    parser.add_option("--tst_ann_p", "--test_ann_path", dest="test_ann_path", help="Path to test annotation json-file.")
+    parser.add_option("--tst_ann_p", "--test_ann_path", dest="test_ann_path", help="Path to test annotation json-file.", default = "")
 
     parser.add_option("--NAME_TR_DATASET", "--NAME_OF_TRAIN_DATASET", type="string", dest="NAME_OF_TRAIN_DATASET", help="Name of training dataset.")
-    parser.add_option("--NAME_TEST_DATASET", "--NAME_OF_TEST_DATASET", type="string", dest="NAME_OF_TEST_DATASET", help="Name of testing dataset.")
+    parser.add_option("--NAME_TEST_DATASET", "--NAME_OF_TEST_DATASET", type="string", dest="NAME_OF_TEST_DATASET", help="Name of testing dataset.", default = "")
     parser.add_option("--OUTPUT_DIR", "--OUTPUT_DIR", dest="OUTPUT_DIR", help="Path to folder where weights will be saved.")
     parser.add_option("--BASE_CFG_PATH", "--BASE_CFG_PATH", dest="BASE_CFG_PATH", help="BASE_CFG_PATH", default = "")
 
@@ -570,7 +593,7 @@ def parse_params_from_config(config_path="config.ini"):
     nntrain_config['CPU'] = bool(int(nntrain_config['CPU']))
     # nntrain_config['CPU'] = True
 
-    nntrain_config['ClassesNames'] = [nntrain_config['ClassesNames'].strip()]
+    nntrain_config['ClassesNames'] = nntrain_config['ClassesNames'].strip().split(",")
     nntrain_config['ExpectedShapes'] = [int(x) for x in nntrain_config['ExpectedShapes'].split(',')]
     
     class Options:
@@ -611,7 +634,7 @@ def parse_params_from_config(config_path="config.ini"):
     
     # Дополнительные поля для совместимости (если используются)
     options.NAME_OF_TRAIN_DATASET = "train_dataset_planes"
-    options.NAME_OF_TEST_DATASET = "test_dataset_planes"
+    options.NAME_OF_TEST_DATASET = "test_dataset_planes" if options.test_ann_path != "" else ""
     options.BASE_CFG_PATH = "C:/PHOTOMOD Radar/SARTectron/configs/faster_rcnn_X_101_32x8d_FPN_3x.yaml"  # faster_rcnn_R_50_FPN_3x.yaml"
     options.train_folder = os.path.abspath(options.train_ann_path)
     options.test_folder = os.path.abspath(options.test_ann_path)
@@ -639,7 +662,8 @@ def run_training_from_config(config_path="config.ini"):
 
 def main():
     parse_params()
-    # run_training_from_config('D:/Radar/Datasets/_weights/Dissertation_Experiments/Experiment 6/ChaoHU_and_Synthetic_500imgs_new/train.trn')
+    # run_training_from_config('D:/Radar/Datasets/_weights/Dissertation_Experiments_old/Experiment 6/ChaoHU_and_Synthetic_500imgs_new/train.trn')
+    # run_training_from_config('//HEAP2\Radar-2\Training\weights_X101_32x8d/train.trn')
 
     # cfg_name = "sartectron_config.yaml"
     # cfg_path = "C:/Radar/Datasets/Tucson_Project/Weights_CondorScaled_TerrasarDescending/" + cfg_name
