@@ -8,11 +8,7 @@ site_packages = "/home/bogdan/miniconda3/envs/sartectron/lib/python3.10/site-pac
 SARTTECTRON_SRC = "/home/bogdan/SARTectron"
 conda_lib = "/home/bogdan/miniconda3/envs/sartectron/lib"
 
-<<<<<<< HEAD
 # Fix for scipy.linalg.blas: LD_LIBRARY_PATH + runtime hook
-=======
-# Фикс для scipy.linalg.blas: LD_LIBRARY_PATH + runtime hook
->>>>>>> a737050adf88b304dbc3eecc39d8a1424da83b30
 binaries = [
     (os.path.join(conda_lib, "libopenblasp-r0.3.32.so"), "."),
     (os.path.join(conda_lib, "libcblas.so"), "."),
@@ -46,11 +42,7 @@ a = Analysis(['SARTectron.py'],
         'scipy', 'scipy.linalg', 'scipy.linalg.blas',
         'skimage', 'skimage.io', 'skimage.color'
     ],
-<<<<<<< HEAD
     # runtime hook for BLAS
-=======
-    # Критично: runtime hook для BLAS
->>>>>>> a737050adf88b304dbc3eecc39d8a1424da83b30
     runtime_hooks=[os.path.join(SARTTECTRON_SRC, "custom_trainer/blas_runtime_hook.py")],
     excludes=[
         'libstdc++', 'libgcc_s', 'libgomp', 'libquadmath',
