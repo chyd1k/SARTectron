@@ -268,7 +268,6 @@ def train_func(cfg, train_imgs_folder, test_imgs_folder, train_annotation_path, 
     # Настраиваем логгер с рангом ДО создания DefaultTrainer. Иначе он сам
     # вызовет setup_logger() без ранга (distributed_rank=0), и stdout-обработчик
     # добавится на всех процессах -> каждое сообщение печатается num_gpus раз.
-    print(f"[pid={os.getpid()}] rank={comm.get_rank()} main={comm.is_main_process()}", flush=True)
 
     rank = comm.get_rank()
     setup_logger(output=cfg.OUTPUT_DIR, distributed_rank=rank, name="fvcore")
@@ -687,9 +686,9 @@ def run_training_from_config(config_path="config.ini"):
 
 
 def main():
-    parse_params()
+    # parse_params()
     
-    # run_training_from_config('/home/bogdan/_data/_weights/v2/2.trn')
+    run_training_from_config('/home/bogdan/_data/_weights/v2/2.trn')
 
     # run_training_from_config('D:/Radar/Datasets/_weights/Dissertation_Experiments_old/Experiment 6/ChaoHU_and_Synthetic_500imgs_new/train.trn')
     # run_training_from_config('//HEAP2\Radar-2\Training\weights_X101_32x8d/train.trn')
