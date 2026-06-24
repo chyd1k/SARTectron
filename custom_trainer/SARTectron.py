@@ -686,9 +686,9 @@ def run_training_from_config(config_path="config.ini"):
 
 
 def main():
-    # parse_params()
+    parse_params()
     
-    run_training_from_config('/home/bogdan/_data/_weights/v2/2.trn')
+    # run_training_from_config('/home/bogdan/_data/_weights/v2/2.trn')
 
     # run_training_from_config('D:/Radar/Datasets/_weights/Dissertation_Experiments_old/Experiment 6/ChaoHU_and_Synthetic_500imgs_new/train.trn')
     # run_training_from_config('//HEAP2\Radar-2\Training\weights_X101_32x8d/train.trn')
