@@ -147,8 +147,16 @@ class Boxes:
         Args:
             tensor (Tensor[float]): a Nx4 matrix.  Each row is (x1, y1, x2, y2).
         """
+        # device = tensor.device if isinstance(tensor, torch.Tensor) else torch.device("cpu")
+        # tensor = torch.as_tensor(tensor, dtype=torch.float32, device=device)
+
         device = tensor.device if isinstance(tensor, torch.Tensor) else torch.device("cpu")
+        # Список numpy-массивов -> сначала склеиваем в один ndarray, иначе torch
+        # конвертирует поэлементно и сыплет предупреждением "extremely slow".
+        if isinstance(tensor, (list, tuple)) and len(tensor) and isinstance(tensor[0], np.ndarray):
+            tensor = np.asarray(tensor)
         tensor = torch.as_tensor(tensor, dtype=torch.float32, device=device)
+
         if tensor.numel() == 0:
             # Use reshape, so we don't end up creating a new tensor that does not depend on
             # the inputs (and consequently confuses jit)

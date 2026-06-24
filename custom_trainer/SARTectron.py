@@ -6,9 +6,8 @@ def script(obj, optimize=True, _frames_up=0, _rcb=None):
 import torch.jit
 torch.jit.script_method = script_method
 torch.jit.script = script
-import torch
 
-import os, sys, torch, gc, time, cv2, copy, re, json, configparser
+import os, sys, torch, logging, gc, time, cv2, copy, re, json, configparser
 from multiprocessing import Process, freeze_support
 # sys.path.append('D:/detectron2/detectron2')
 
@@ -22,12 +21,15 @@ from detectron2.data.datasets import load_coco_json, register_coco_instances
 from detectron2.data import build_detection_test_loader, build_detection_train_loader
 from detectron2.data import DatasetMapper
 from detectron2.engine import DefaultTrainer, launch
+from detectron2.engine import hooks as d2hooks
 from detectron2.evaluation import COCOEvaluator
 from detectron2.modeling import build_model
 from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.data.catalog import Metadata
 from detectron2.data import detection_utils as utils
 from detectron2.utils.visualizer import ColorMode, Visualizer
+from detectron2.utils.logger import setup_logger
+import detectron2.utils.comm as comm
 import detectron2.data.transforms as T
 
 
@@ -77,17 +79,23 @@ class CustomTrainerAndVal(DefaultTrainer):
         return COCOEvaluator(dataset_name, cfg, True, output_folder, use_fast_impl=False)
 
     def build_hooks(self):
-        hooks = super().build_hooks()
-        hooks.insert(-1,LossEvalHook(
+        hooks_list = super().build_hooks()
+        loss_hook = LossEvalHook(
             self.cfg.TEST.EVAL_PERIOD,
             self.model,
             build_detection_test_loader(
                 self.cfg,
                 self.cfg.DATASETS.TEST[0],
-                DatasetMapper(self.cfg,True)
-            )
-        ))
-        return hooks
+                DatasetMapper(self.cfg, True),
+            ),
+        )
+        # Встаём СТРОГО перед штатным EvalHook — одинаково на всех рангах.
+        # insert(-1, ...) ломается: на rank>0 нет PeriodicWriter, поэтому
+        # EvalHook там последний, и хук оказывается до него только на одном ранке.
+        idx = next(i for i, h in enumerate(hooks_list)
+                   if isinstance(h, d2hooks.EvalHook))
+        hooks_list.insert(idx, loss_hook)
+        return hooks_list
 
 
 class CustomTrainerNoVal(DefaultTrainer):
@@ -256,7 +264,16 @@ def set_cfg_params(params, base_cfg_path = ""):
     return cfg
 
 
-def train_func(cfg, train_imgs_folder, test_imgs_folder, train_annotation_path,test_annotation_path):
+def train_func(cfg, train_imgs_folder, test_imgs_folder, train_annotation_path, test_annotation_path):
+    # Настраиваем логгер с рангом ДО создания DefaultTrainer. Иначе он сам
+    # вызовет setup_logger() без ранга (distributed_rank=0), и stdout-обработчик
+    # добавится на всех процессах -> каждое сообщение печатается num_gpus раз.
+    print(f"[pid={os.getpid()}] rank={comm.get_rank()} main={comm.is_main_process()}", flush=True)
+
+    rank = comm.get_rank()
+    setup_logger(output=cfg.OUTPUT_DIR, distributed_rank=rank, name="fvcore")
+    setup_logger(output=cfg.OUTPUT_DIR, distributed_rank=rank)  # name="detectron2"
+
     has_val = not (
         len(cfg.DATASETS.TEST) == 0 or
         cfg.DATASETS.TEST[0] == "" or
@@ -279,6 +296,14 @@ def train_func(cfg, train_imgs_folder, test_imgs_folder, train_annotation_path,t
         trainer = CustomTrainerAndVal(cfg)
     else:
         trainer = CustomTrainerNoVal(cfg)
+
+    # ГАРАНТИЯ от дублей: DefaultTrainer.__init__ уже отработал и мог навесить
+    # stdout без учёта ранга.
+    if rank > 0:
+        for nm in ("detectron2", "fvcore"):
+            lg = logging.getLogger(nm)
+            lg.handlers.clear()
+            lg.propagate = False
 
     trainer.resume_or_load(resume=cfg.MODEL.WEIGHTS[-4:] == ".pth")
     trainer.train()
@@ -635,7 +660,8 @@ def parse_params_from_config(config_path="config.ini"):
     # Дополнительные поля для совместимости (если используются)
     options.NAME_OF_TRAIN_DATASET = "train_dataset_planes"
     options.NAME_OF_TEST_DATASET = "test_dataset_planes" if options.test_ann_path != "" else ""
-    options.BASE_CFG_PATH = "C:/PHOTOMOD Radar/SARTectron/configs/faster_rcnn_X_101_32x8d_FPN_3x.yaml"  # faster_rcnn_R_50_FPN_3x.yaml"
+    # options.BASE_CFG_PATH = "C:/PHOTOMOD Radar/SARTectron/configs/faster_rcnn_X_101_32x8d_FPN_3x.yaml"  # faster_rcnn_R_50_FPN_3x.yaml"
+    options.BASE_CFG_PATH = "/home/bogdan/Release/SARTectron/configs/faster_rcnn_X_101_32x8d_FPN_3x.yaml"
     options.train_folder = os.path.abspath(options.train_ann_path)
     options.test_folder = os.path.abspath(options.test_ann_path)
     options.yaml_file = ""
@@ -662,6 +688,9 @@ def run_training_from_config(config_path="config.ini"):
 
 def main():
     parse_params()
+    
+    # run_training_from_config('/home/bogdan/_data/_weights/v2/2.trn')
+
     # run_training_from_config('D:/Radar/Datasets/_weights/Dissertation_Experiments_old/Experiment 6/ChaoHU_and_Synthetic_500imgs_new/train.trn')
     # run_training_from_config('//HEAP2\Radar-2\Training\weights_X101_32x8d/train.trn')
 

@@ -5,8 +5,15 @@ from datetime import timedelta
 import torch
 import torch.distributed as dist
 import torch.multiprocessing as mp
-
 from detectron2.utils import comm
+
+# import os
+
+# os.environ["NCCL_DEBUG"] = "INFO"
+# os.environ["NCCL_DEBUG_SUBSYS"] = "INIT,P2P,GRAPH"   # какой транспорт и топология выбираются
+# os.environ["TORCH_CPP_LOG_LEVEL"] = "INFO"           # без этого TORCH_DISTRIBUTED_DEBUG молчит
+# os.environ["TORCH_DISTRIBUTED_DEBUG"] = "DETAIL"     # проверка согласованности коллективов между ранками
+
 
 __all__ = ["launch"]
 
